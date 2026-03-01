@@ -78,6 +78,19 @@ def profile_from_series(series: str) -> str:
     return "general"
 
 
+def memory_ratio_from_series(series: str) -> float:
+    token = (series or "").lower()
+    if token.startswith(("r", "x", "u", "z")):
+        return 8.0
+    if token.startswith(("m", "i", "d")):
+        return 4.0
+    if token.startswith(("c", "t")):
+        return 2.0
+    if token.startswith(("p", "g")):
+        return 8.0
+    return 4.0
+
+
 def cpu_arch_from_options(options: str) -> str:
     token = (options or "").lower()
     if "g" in token:
@@ -93,7 +106,7 @@ def cpu_vendor_from_options(options: str) -> str:
         return "arm"
     if "i" in token:
         return "intel"
-    return "unknown"
+    return "unspecified_x86_vendor"
 
 
 def requires_intel(options: str) -> bool:
@@ -104,12 +117,14 @@ def requires_intel(options: str) -> bool:
 def build_indicators(instance_type: str) -> dict[str, Any]:
     parsed = parse_aws_instance_type(instance_type)
     vcpu = aws_size_to_vcpus(parsed["size"])
-    memory_gb = estimate_memory_gb(parsed["series"], vcpu)
+    memory_ratio = memory_ratio_from_series(parsed["series"])
+    memory_gb = round(vcpu * memory_ratio, 1)
 
     profile = profile_from_series(parsed["series"])
     options = parsed["options"]
 
     has_local_temp_disk = "d" in options or profile == "storage"
+    is_ebs_optimized = "b" in options
     is_gpu_accelerated = profile == "gpu"
     is_network_optimized = "n" in options
     is_burstable = profile == "burstable"
@@ -125,6 +140,11 @@ def build_indicators(instance_type: str) -> dict[str, Any]:
         and memory_gb >= 64
     )
 
+    if parsed["size"] in {"nano", "micro", "small"}:
+        size_rule_confidence = "medium"
+    else:
+        size_rule_confidence = "high"
+
     return {
         "input_instance_type": instance_type,
         "status": "ok",
@@ -134,15 +154,19 @@ def build_indicators(instance_type: str) -> dict[str, Any]:
         "size": parsed["size"],
         "vcpu": vcpu,
         "memory_gb": memory_gb,
+        "memory_ratio": memory_ratio,
         "cpu_arch": cpu_arch,
         "cpu_vendor": cpu_vendor,
         "requires_intel": intel_required,
         "has_local_temp_disk": has_local_temp_disk,
+        "is_ebs_optimized": is_ebs_optimized,
         "is_gpu_accelerated": is_gpu_accelerated,
         "is_network_optimized": is_network_optimized,
         "is_burstable": is_burstable,
         "profile": profile,
         "sap_possible": sap_possible,
+        "size_rule_confidence": size_rule_confidence,
+        "memory_rule_confidence": "high",
         "matched_by": "aws_naming_rules",
     }
 

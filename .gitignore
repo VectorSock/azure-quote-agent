@@ -1,0 +1,94 @@
+﻿# =========================
+# Project-specific test data
+# =========================
+input/
+output/
+data/input/
+data/output/
+
+# Excel temp/lock files
+~$*.xlsx
+~$*.xls
+~$*.xlsm
+~$*.xlsb
+
+# =========================
+# Secrets / Environment
+# =========================
+.env
+.env.*
+!.env.example
+*.secrets.*
+*.key
+*.pem
+*.pfx
+*.p12
+*.cer
+
+# Azure / Cloud local auth caches (safe defaults; keep if you know you need them)
+.azure/
+azds/
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*.class
+
+# Virtual envs
+.venv/
+venv/
+env/
+ENV/
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Test / tooling
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+.tox/
+.nox/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
+logs/
+
+# =========================
+# IDE / Editor
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# =========================
+# OS files
+# =========================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# =========================
+# Git
+# =========================
+# (Usually you should NOT ignore .git/, left here as a reminder)

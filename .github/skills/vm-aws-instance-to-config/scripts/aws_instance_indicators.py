@@ -207,6 +207,26 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writerows(rows)
 
 
+def merge_append_only(base_row: dict[str, Any], parsed: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base_row)
+    for key, value in parsed.items():
+        if key not in merged:
+            merged[key] = value
+            continue
+
+        alias = f"parsed_{key}"
+        if alias not in merged:
+            merged[alias] = value
+            continue
+
+        suffix = 2
+        while f"{alias}_{suffix}" in merged:
+            suffix += 1
+        merged[f"{alias}_{suffix}"] = value
+
+    return merged
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="AWS instance type to VM indicators")
     group = parser.add_mutually_exclusive_group(required=True)
@@ -244,8 +264,7 @@ def main() -> None:
     for row in rows:
         instance_type = str(row.get(args.column) or "").strip()
         indicators = safe_build(instance_type)
-        merged = dict(row)
-        merged.update(indicators)
+        merged = merge_append_only(row, indicators)
         output_rows.append(merged)
 
     output_file = Path(args.output)

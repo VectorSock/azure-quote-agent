@@ -228,7 +228,7 @@ class RegionResolver:
 
 
 def resolve_project_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return Path(__file__).resolve().parents[4]
 
 
 def resolve_mapping_file(path_arg: str | None) -> Path:
@@ -237,6 +237,7 @@ def resolve_mapping_file(path_arg: str | None) -> Path:
         return path if path.is_absolute() else resolve_project_root() / path
 
     candidates = [
+        resolve_project_root() / ".github" / "skills" / "region-mapping" / "assets" / "get_regions.xlsx",
         resolve_project_root() / "skills" / "region-mapping" / "assets" / "get_regions.xlsx",
         resolve_project_root() / "data" / "get_regions.xlsx",
         Path(__file__).resolve().parents[1] / "assets" / "get_regions.xlsx",

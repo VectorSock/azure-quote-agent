@@ -200,6 +200,14 @@ def parse_bool(value: str | None, default: bool = False) -> bool:
     return token in {"1", "true", "yes", "y", "on"}
 
 
+def first_non_empty(row: dict[str, Any], keys: list[str], default: Any = None) -> Any:
+    for key in keys:
+        value = row.get(key)
+        if value is not None and str(value).strip() != "":
+            return value
+    return default
+
+
 def load_csv(path: Path) -> list[dict[str, Any]]:
     with path.open("r", encoding="utf-8-sig", newline="") as fp:
         return list(csv.DictReader(fp))
@@ -259,22 +267,37 @@ def main() -> None:
             print(json.dumps({"status": "ok", "rows": 0, "message": "empty input"}, ensure_ascii=False))
             return
 
-        required = {"vcpu", "memory_gb"}
-        missing = [col for col in required if col not in rows[0]]
+        required_any = {
+            "vcpu": ["vcpu", "parsed_vcpu"],
+            "memory_gb": ["memory_gb", "parsed_memory_gb"],
+        }
+        missing = [name for name, candidates in required_any.items() if all(col not in rows[0] for col in candidates)]
         if missing:
-            raise ValueError(f"Batch input missing columns: {missing}")
+            raise ValueError(
+                "Batch input missing required columns. "
+                f"Need at least one of each group: {required_any}; missing groups={missing}"
+            )
 
         output_rows: list[dict[str, Any]] = []
         for row in rows:
+            vcpu_value = first_non_empty(row, ["vcpu", "parsed_vcpu"], 0)
+            memory_value = first_non_empty(row, ["memory_gb", "parsed_memory_gb"], 0)
+
+            cpu_vendor = str(first_non_empty(row, ["cpu_vendor", "parsed_cpu_vendor"], "unknown")).strip().lower()
+            if cpu_vendor in {"", "none", "null", "nan", "unspecified_x86_vendor"}:
+                cpu_vendor = "unknown"
+
             result = map_single(
-                vcpu=int(float(row.get("vcpu") or 0)),
-                memory_gb=float(row.get("memory_gb") or 0),
-                cpu_vendor=str(row.get("cpu_vendor") or "unknown").strip().lower(),
-                cpu_arch=str(row.get("cpu_arch") or "x86_64").strip().lower(),
-                burstable=parse_bool(str(row.get("burstable") or "")),
-                gpu=parse_bool(str(row.get("gpu") or "")),
-                local_temp_disk=parse_bool(str(row.get("local_temp_disk") or "")),
-                network_optimized=parse_bool(str(row.get("network_optimized") or "")),
+                vcpu=int(float(vcpu_value or 0)),
+                memory_gb=float(memory_value or 0),
+                cpu_vendor=cpu_vendor,
+                cpu_arch=str(first_non_empty(row, ["cpu_arch", "parsed_cpu_arch"], "x86_64")).strip().lower(),
+                burstable=parse_bool(str(first_non_empty(row, ["burstable", "is_burstable"], ""))),
+                gpu=parse_bool(str(first_non_empty(row, ["gpu", "is_gpu_accelerated"], ""))),
+                local_temp_disk=parse_bool(str(first_non_empty(row, ["local_temp_disk", "has_local_temp_disk"], ""))),
+                network_optimized=parse_bool(
+                    str(first_non_empty(row, ["network_optimized", "is_network_optimized"], ""))
+                ),
                 prefer_amd=parse_bool(str(row.get("prefer_amd") or "true"), default=True),
                 fallback_count=int(float(row.get("fallback_count") or args.fallback_count)),
             )

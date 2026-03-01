@@ -10,7 +10,7 @@ description: 从原始 Excel 中做第一步结构化抽取，输出标准化中
 
 本技能会：
 - 读取 Excel 并标准化列名
-- 生成统一记录（provider、resource_type、instance_name、region、status 等）
+- 生成统一记录（provider、resource_type、instance_name、quantity、region、status 等）
 - 按 `profile` 输出针对后续 skill 的最小输入集
 
 ## 何时使用
@@ -22,13 +22,13 @@ description: 从原始 Excel 中做第一步结构化抽取，输出标准化中
 所有路径默认基于当前工作目录。
 
 ### 标准抽取（默认 profile: `aws_vm`）
-`python skills/excel-input-extraction/scripts/extract_excel_inputs.py --input-excel "input/sample_input.xlsx" --output "output/extracted_inputs.csv"`
+`python .github/skills/excel-input-extraction/scripts/extract_excel_inputs.py --input-excel "input/sample_input.xlsx" --output "output/extracted_inputs.csv"`
 
 ### 通用抽取（保留所有资源类型）
-`python skills/excel-input-extraction/scripts/extract_excel_inputs.py --input-excel "input/sample_input.xlsx" --profile all_resources --output "output/extracted_all_resources.csv"`
+`python .github/skills/excel-input-extraction/scripts/extract_excel_inputs.py --input-excel "input/sample_input.xlsx" --profile all_resources --output "output/extracted_all_resources.csv"`
 
 ### 过滤抽取（按 provider / resource_type）
-`python skills/excel-input-extraction/scripts/extract_excel_inputs.py --input-excel "input/sample_input.xlsx" --profile all_resources --provider aws --resource-type vm --output "output/aws_vm_rows.csv"`
+`python .github/skills/excel-input-extraction/scripts/extract_excel_inputs.py --input-excel "input/sample_input.xlsx" --profile all_resources --provider aws --resource-type vm --output "output/aws_vm_rows.csv"`
 
 ## 参数说明
 - `--input-excel`：输入 Excel 路径（`.xlsx` / `.xls`）。
@@ -38,10 +38,15 @@ description: 从原始 Excel 中做第一步结构化抽取，输出标准化中
 - `--provider`：可选 provider 过滤（如 `aws` / `azure` / `gcp`）。
 - `--resource-type`：可选资源类型过滤（如 `vm` / `storage` / `db`）。
 
+## 关键输出字段
+- `quantity`：实例数量，若输入存在 `quantity/qty/count/数量/instances` 等列会自动识别并透传。
+
 ## 执行规则
 1. 后续流程只消费脚本输出，不要自行补猜缺失字段。
 2. `extracted_rows=0` 时，明确告知“当前 profile 未命中可用记录”。
 3. 需要新增资源抽取能力时，优先在脚本中新增 profile extractor，而不是改写现有 profile 规则。
+4. 若配置单 Excel 中写"EC2/ECS/Compute Engine"等云厂商产品名，均应归一化为 `vm`。
+5. `os` 会做内置归一化：`suse`→`linux`、`centos`→`linux`、`windows with sql*`→`windows`。
 
 ## 输出示例
 ```json
@@ -59,7 +64,7 @@ description: 从原始 Excel 中做第一步结构化抽取，输出标准化中
   "eligible_rows": 52,
   "extracted_rows": 34,
   "required_for_next_skill": ["instance_type"],
-  "recommended_columns": ["provider", "resource_type", "instance_name", "vcpu", "memory_gb", "os", "region_input", "workload"]
+  "recommended_columns": ["provider", "resource_type", "instance_name", "quantity", "vcpu", "memory_gb", "os", "region_input", "workload"]
 }
 ```
 

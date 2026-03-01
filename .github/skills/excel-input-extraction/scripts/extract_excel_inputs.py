@@ -17,6 +17,7 @@ COLUMN_ALIASES: dict[str, list[str]] = {
     "provider": ["provider", "cloud", "cloud_provider", "vendor", "平台"],
     "resource_type": ["resource_type", "resource", "service_type", "product_family", "type", "资源类型"],
     "instance_name": ["instance_name", "instance_type", "vm_size", "sku", "规格", "实例类型", "机型"],
+    "quantity": ["quantity", "qty", "count", "数量", "instances"],
     "vcpu": ["vcpu", "cpu", "cores", "vcpus"],
     "memory_gb": ["memory_gb", "memory", "ram_gb", "mem_gb", "内存"],
     "os": ["os", "operating_system", "platform"],
@@ -72,6 +73,27 @@ def to_float_or_none(value: Any) -> float | None:
         return None
 
 
+def normalize_os_name(value: Any) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+
+    lowered = raw.lower()
+    if "windows with sql" in lowered:
+        return "windows"
+    if lowered == "windows with sql server standard":
+        return "windows"
+    if "windows" in lowered:
+        return "windows"
+    if "suse" in lowered:
+        return "linux"
+    if "centos" in lowered:
+        return "linux"
+    if lowered in {"linux/unix", "linux", "unix"}:
+        return "linux"
+    return raw
+
+
 def detect_column(columns: list[str], aliases: list[str]) -> str | None:
     alias_set = {normalize_col_name(item) for item in aliases}
     for col in columns:
@@ -88,9 +110,24 @@ def infer_provider(provider: str, instance_name: str) -> str:
     return ""
 
 
+RESOURCE_TYPE_ALIASES: dict[str, str] = {
+    "ec2": "vm",
+    "virtual machine": "vm",
+    "virtual_machine": "vm",
+    "compute": "vm",
+    "虚拟机": "vm",
+}
+
+
+def normalize_resource_type(raw: str) -> str:
+    """Map common resource-type synonyms to a canonical value."""
+    key = raw.strip().lower()
+    return RESOURCE_TYPE_ALIASES.get(key, key)
+
+
 def infer_resource_type(resource_type: str, instance_name: str) -> str:
     if resource_type:
-        return resource_type
+        return normalize_resource_type(resource_type)
     if instance_name:
         return "vm"
     return ""
@@ -126,9 +163,10 @@ def build_records_by_fallback(input_excel: Path) -> list[dict[str, Any]]:
                 "provider": provider,
                 "resource_type": resource_type,
                 "instance_name": instance_name,
+                "quantity": to_float_or_none(row.get(detected["quantity"])) if detected["quantity"] else None,
                 "vcpu": to_float_or_none(row.get(detected["vcpu"])) if detected["vcpu"] else None,
                 "memory_gb": to_float_or_none(row.get(detected["memory_gb"])) if detected["memory_gb"] else None,
-                "os": str(row.get(detected["os"], "") if detected["os"] else "").strip() or None,
+                "os": normalize_os_name(row.get(detected["os"], "") if detected["os"] else ""),
                 "region_input": str(row.get(detected["region_input"], "") if detected["region_input"] else "").strip() or None,
                 "region_aws": None,
                 "region_azure": None,
@@ -151,6 +189,7 @@ def as_base_row(record: Any) -> dict[str, Any]:
             "provider": record.get("provider"),
             "resource_type": record.get("resource_type"),
             "instance_name": record.get("instance_name"),
+            "quantity": record.get("quantity"),
             "vcpu": record.get("vcpu"),
             "memory_gb": record.get("memory_gb"),
             "os": record.get("os"),
@@ -167,6 +206,7 @@ def as_base_row(record: Any) -> dict[str, Any]:
         "provider": getattr(record, "provider", None),
         "resource_type": getattr(record, "resource_type", None),
         "instance_name": getattr(record, "instance_name", None),
+        "quantity": getattr(record, "quantity", None),
         "vcpu": getattr(record, "vcpu", None),
         "memory_gb": getattr(record, "memory_gb", None),
         "os": getattr(record, "os", None),
@@ -209,6 +249,7 @@ EXTRACTOR_REGISTRY: dict[str, dict[str, Any]] = {
             "provider",
             "resource_type",
             "instance_name",
+            "quantity",
             "vcpu",
             "memory_gb",
             "os",
@@ -223,6 +264,7 @@ EXTRACTOR_REGISTRY: dict[str, dict[str, Any]] = {
             "provider",
             "resource_type",
             "instance_name",
+            "quantity",
             "vcpu",
             "memory_gb",
             "os",

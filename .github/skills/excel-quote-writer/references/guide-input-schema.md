@@ -20,20 +20,35 @@
 
 ## line_items 推荐字段
 
+### 通用字段
 - `item_id`
 - `provider`（aws/azure/gcp）
-- `service`（vm/disk/network/...）
-- `sku`
-- `region`
+- `resource_type`（或 `service`）
 - `quantity`
-- `unit`
-- `unit_price_hourly`
-- `monthly_hours`
-- `monthly_cost`
-- `term`（paygo/ri_1y/ri_3y）
-- `currency`
-- `confidence`
-- `notes`
+- `sku/os`（或 `sku_os` / `os` / `sku`）
+- `region`
+- `region_azure`
+- `primary_sku`（Azure 映射主 SKU）
+- `fallback_skus`
+- `sap_sku`
+- `billing_unit`（或 `unit`）
+
+### 单价字段（小时）
+- `unit_price_AWS_paygo`
+- `unit_price_Azure_paygo`（兼容 `unit_price_hourly`）
+
+### 月度总价字段
+- `line_total_AWS_paygo`（兼容 `monthly_cost_AWS_paygo` / `monthly_cost`）
+- `line_total_Azure_paygo`（兼容 `monthly_cost_Azure_paygo`）
+- `line_total_AWS_1YRI`（兼容 `monthly_cost_AWS_1YRI`）
+- `line_total_AWS_3YRI`（兼容 `monthly_cost_AWS_3YRI`）
+- `line_total_Azure_1YRI`（兼容 `monthly_cost_Azure_1YRI`）
+- `line_total_Azure_3YRI`（兼容 `monthly_cost_Azure_3YRI`）
+
+### 复核与证据字段
+- `review_flag`
+- `review_reason`（兼容 `notes`）
+- `evidence_id`
 
 ## assumptions 示例
 

@@ -34,6 +34,7 @@ def choose_version(family: str) -> str:
 
 
 def features_from_config(
+    family: str,
     cpu_vendor: str,
     cpu_arch: str,
     burstable: bool,
@@ -43,6 +44,7 @@ def features_from_config(
     prefer_amd: bool,
 ) -> str:
     features: list[str] = []
+    family_token = family.upper()
 
     if (cpu_vendor == "amd" or (prefer_amd and cpu_vendor == "unknown")) and cpu_arch != "arm64" and not burstable and not gpu:
         features.append("a")
@@ -52,7 +54,11 @@ def features_from_config(
         features.append("d")
     if network_optimized:
         features.append("n")
-    features.append("s")
+    if family_token != "B":
+        features.append("s")
+
+    ordered = ["a", "p", "d", "n", "s"]
+    features = [item for item in ordered if item in features]
 
     deduped: list[str] = []
     for feature in features:
@@ -64,9 +70,9 @@ def features_from_config(
 def candidate_families(primary: str) -> list[str]:
     token = primary.upper()
     if token == "D":
-        return ["D", "E", "F", "B"]
+        return ["D", "E", "F"]
     if token == "E":
-        return ["E", "D", "F"]
+        return ["E", "M", "D"]
     if token == "F":
         return ["F", "D", "E"]
     if token == "N":
@@ -76,9 +82,16 @@ def candidate_families(primary: str) -> list[str]:
     return [token, "D", "E", "F"]
 
 
-def fallback_features(primary_features: str) -> list[str]:
+def fallback_features(primary_features: str, family: str) -> list[str]:
+    family_token = family.upper()
     values = [primary_features]
-    for candidate in ["as", "s", "a", "ds", "d", ""]:
+
+    if family_token == "B":
+        candidates = ["", "a"]
+    else:
+        candidates = ["as", "s", "a", "ds", "d", ""]
+
+    for candidate in candidates:
         if candidate not in values:
             values.append(candidate)
     return values
@@ -89,12 +102,17 @@ def build_candidates(primary_family: str, vcpu: int, features: str, fallback_cou
     candidates: list[str] = [primary]
 
     for family in candidate_families(primary_family):
-        for suffix in fallback_features(features):
-            sku = f"Standard_{family}{vcpu}{suffix}{choose_version(family)}"
-            if sku not in candidates:
-                candidates.append(sku)
-            if len(candidates) >= fallback_count + 1:
-                return primary, candidates[1 : fallback_count + 1]
+        sizes_to_try = [vcpu]
+        if family in {"D", "E", "F", "M"}:
+            sizes_to_try.append(vcpu * 2)
+
+        for candidate_vcpu in sizes_to_try:
+            for suffix in fallback_features(features, family):
+                sku = f"Standard_{family}{candidate_vcpu}{suffix}{choose_version(family)}"
+                if sku not in candidates:
+                    candidates.append(sku)
+                if len(candidates) >= fallback_count + 1:
+                    return primary, candidates[1 : fallback_count + 1]
 
     return primary, candidates[1 : fallback_count + 1]
 
@@ -134,6 +152,7 @@ def map_single(
 
     family = family_from_shape(vcpu, memory_gb, burstable, gpu)
     features = features_from_config(
+        family=family,
         cpu_vendor=cpu_vendor,
         cpu_arch=cpu_arch,
         burstable=burstable,
@@ -147,7 +166,9 @@ def map_single(
 
     assumptions = [
         "version_policy_applied",
-        "premium_storage_suffix_default=s",
+        "premium_storage_suffix_default_except_b_family",
+        "fallback_suffix_priority_applied",
+        "fallback_size_escalation_applied",
     ]
     if cpu_vendor == "unknown" and prefer_amd and cpu_arch != "arm64" and not burstable and not gpu:
         assumptions.append("cpu_vendor_unknown_prefer_amd_applied")
@@ -214,7 +235,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gpu", action="store_true")
     parser.add_argument("--local-temp-disk", action="store_true")
     parser.add_argument("--network-optimized", action="store_true")
-    parser.add_argument("--prefer-amd", action="store_true", default=True)
+    parser.add_argument("--prefer-amd", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--fallback-count", type=int, default=3)
 
     parser.add_argument("--input-file", help="batch mode CSV input")

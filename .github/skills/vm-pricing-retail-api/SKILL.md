@@ -72,6 +72,6 @@ description: 查询 AWS/Azure 官方零售价格并返回 VM 的 PayGo、1Y RI�
 ```
 
 ## 参考材料
-- `references/azure-vm-meter-selection.md`
-- `references/aws-ec2-sku-match-rules.md`
-- `references/ri-calculation-rules.md`
+- `references/guide-azure-meter-selection.md`
+- `references/guide-aws-sku-matching.md`
+- `references/guide-ri-normalization.md`

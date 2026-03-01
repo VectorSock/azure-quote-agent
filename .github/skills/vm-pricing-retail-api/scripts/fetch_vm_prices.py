@@ -22,6 +22,22 @@ def get_json(url: str, timeout: int) -> dict[str, Any]:
         return json.loads(resp.read().decode("utf-8"))
 
 
+def fetch_azure_all_items(url: str, timeout: int, max_pages: int = 20) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    next_url: str | None = url
+    page_count = 0
+
+    while next_url and page_count < max_pages:
+        payload = get_json(next_url, timeout=timeout)
+        page_items = payload.get("Items", [])
+        if isinstance(page_items, list):
+            items.extend([item for item in page_items if isinstance(item, dict)])
+        next_url = payload.get("NextPageLink")
+        page_count += 1
+
+    return items
+
+
 def safe_float(value: Any) -> float | None:
     try:
         if value is None:
@@ -68,8 +84,7 @@ def fetch_azure_vm_prices(sku: str, region: str, os_name: str, timeout: int) -> 
     url = f"{AZURE_BASE_URL}?{query}"
 
     try:
-        payload = get_json(url, timeout=timeout)
-        items = payload.get("Items", [])
+        items = fetch_azure_all_items(url, timeout=timeout)
         consumption = [item for item in items if str(item.get("type") or "").lower() == "consumption"]
         reservation = [item for item in items if str(item.get("type") or "").lower() == "reservation"]
 
@@ -79,7 +94,8 @@ def fetch_azure_vm_prices(sku: str, region: str, os_name: str, timeout: int) -> 
         paygo = None
         paygo_meta: dict[str, Any] = {"status": "not_found"}
         if base_consumption:
-            target = base_consumption[0]
+            priced = [item for item in base_consumption if safe_float(item.get("retailPrice")) is not None]
+            target = min(priced, key=lambda item: float(item.get("retailPrice"))) if priced else base_consumption[0]
             paygo = safe_float(target.get("retailPrice"))
             paygo_meta = {
                 "status": "ok" if paygo is not None else "not_found",
@@ -96,11 +112,20 @@ def fetch_azure_vm_prices(sku: str, region: str, os_name: str, timeout: int) -> 
             ]
             if not candidates:
                 return None, {"status": "not_found"}
-            target = candidates[0]
-            total = safe_float(target.get("retailPrice"))
-            if total is None:
+
+            best: tuple[float, dict[str, Any]] | None = None
+            for item in candidates:
+                total = safe_float(item.get("retailPrice"))
+                if total is None:
+                    continue
+                hourly = total / (HOURS_PER_YEAR * years)
+                if best is None or hourly < best[0]:
+                    best = (hourly, item)
+
+            if best is None:
                 return None, {"status": "not_found"}
-            hourly = total / (HOURS_PER_YEAR * years)
+
+            hourly, target = best
             return hourly, {
                 "status": "ok",
                 "reservationTerm": target.get("reservationTerm"),
@@ -124,7 +149,7 @@ def fetch_azure_vm_prices(sku: str, region: str, os_name: str, timeout: int) -> 
                 "ri_3y": ri_3y_meta,
             },
         }
-    except BaseException as exc:  # noqa: BLE001
+    except Exception as exc:
         return {
             "status": "error",
             "source_url": url,
@@ -281,7 +306,7 @@ def fetch_aws_vm_prices(instance_type: str, region: str, os_name: str, timeout: 
                 "ri_3y": ri_3y_meta,
             },
         }
-    except BaseException as exc:  # noqa: BLE001
+    except Exception as exc:
         return {
             "status": "error",
             "error": str(exc),

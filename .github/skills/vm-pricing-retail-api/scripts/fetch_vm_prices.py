@@ -17,6 +17,7 @@ except Exception:  # noqa: BLE001
     Config = None
 
 AZURE_BASE_URL = "https://prices.azure.com/api/retail/prices"
+AWS_BASE_URL = "https://pricing.us-east-1.amazonaws.com"
 HOURS_PER_MONTH = 730
 HOURS_PER_YEAR = 12 * HOURS_PER_MONTH
 
@@ -173,6 +174,10 @@ def aws_os_name(os_name: str) -> str:
     return "Windows" if os_name == "windows" else "Linux"
 
 
+_AWS_REGION_INDEX_CACHE: dict[str, Any] | None = None
+_AWS_REGION_PAYLOAD_CACHE: dict[str, dict[str, Any]] = {}
+
+
 def _aws_region_location_name(region: str) -> str:
     mapping = {
         "us-east-1": "US East (N. Virginia)",
@@ -190,6 +195,185 @@ def _aws_region_location_name(region: str) -> str:
         "eu-central-1": "EU (Frankfurt)",
     }
     return mapping.get(region, region)
+
+
+def _aws_load_region_index(timeout: int) -> dict[str, Any]:
+    global _AWS_REGION_INDEX_CACHE
+    if _AWS_REGION_INDEX_CACHE is not None:
+        return _AWS_REGION_INDEX_CACHE
+
+    index_url = f"{AWS_BASE_URL}/offers/v1.0/aws/AmazonEC2/current/region_index.json"
+    payload = get_json(index_url, timeout=timeout)
+    _AWS_REGION_INDEX_CACHE = payload
+    return payload
+
+
+def _aws_load_region_offer_payload(region: str, timeout: int) -> tuple[dict[str, Any], str]:
+    if region in _AWS_REGION_PAYLOAD_CACHE:
+        payload = _AWS_REGION_PAYLOAD_CACHE[region]
+        return payload, str(payload.get("_source_url") or "")
+
+    index_payload = _aws_load_region_index(timeout=timeout)
+    regions = index_payload.get("regions", {})
+    entry = regions.get(region)
+    if not isinstance(entry, dict):
+        raise ValueError(f"aws region not found in pricing index: {region}")
+
+    version_url = entry.get("currentVersionUrl")
+    if not version_url:
+        raise ValueError(f"aws region currentVersionUrl missing: {region}")
+
+    source_url = f"{AWS_BASE_URL}{version_url}"
+    payload = get_json(source_url, timeout=timeout)
+    payload["_source_url"] = source_url
+    _AWS_REGION_PAYLOAD_CACHE[region] = payload
+    return payload, source_url
+
+
+def _aws_find_sku(payload: dict[str, Any], instance_type: str, os_name: str) -> str | None:
+    products = payload.get("products", {})
+    target_os = aws_os_name(os_name)
+
+    strict_match: str | None = None
+    relaxed_match: str | None = None
+
+    for sku, product in products.items():
+        attrs = product.get("attributes", {})
+        if attrs.get("instanceType") != instance_type:
+            continue
+        if attrs.get("operatingSystem") != target_os:
+            continue
+
+        if relaxed_match is None:
+            relaxed_match = sku
+
+        if (
+            attrs.get("preInstalledSw") == "NA"
+            and attrs.get("tenancy") == "Shared"
+            and attrs.get("capacitystatus") == "Used"
+            and attrs.get("operation") == "RunInstances"
+        ):
+            strict_match = sku
+            break
+
+    return strict_match or relaxed_match
+
+
+def _aws_pick_paygo_from_offer(payload: dict[str, Any], sku: str) -> tuple[float | None, dict[str, Any]]:
+    terms = payload.get("terms", {}).get("OnDemand", {}).get(sku, {})
+    if not terms:
+        return None, {"status": "not_found"}
+
+    best: tuple[float, dict[str, Any], dict[str, Any]] | None = None
+    for term in terms.values():
+        for dim in term.get("priceDimensions", {}).values():
+            unit = str(dim.get("unit") or "").lower()
+            if "hrs" not in unit:
+                continue
+            price = safe_float(dim.get("pricePerUnit", {}).get("USD"))
+            if price is None:
+                continue
+            if best is None or price < best[0]:
+                best = (price, term, dim)
+
+    if best is None:
+        return None, {"status": "not_found"}
+
+    price, term, dim = best
+    return price, {
+        "status": "ok",
+        "effectiveDate": term.get("effectiveDate"),
+        "description": dim.get("description"),
+        "unit": dim.get("unit"),
+    }
+
+
+def _aws_pick_ri_from_offer(payload: dict[str, Any], sku: str, years: int) -> tuple[float | None, dict[str, Any]]:
+    terms = payload.get("terms", {}).get("Reserved", {}).get(sku, {})
+    if not terms:
+        return None, {"status": "not_found"}
+
+    target_length = "1yr" if years == 1 else "3yr"
+    term_hours = HOURS_PER_YEAR * years
+    best: tuple[float, dict[str, Any], dict[str, Any]] | None = None
+
+    for reserved_term in terms.values():
+        attrs = reserved_term.get("termAttributes", {})
+        if str(attrs.get("LeaseContractLength") or "").lower() != target_length:
+            continue
+        if str(attrs.get("OfferingClass") or "").lower() != "standard":
+            continue
+
+        hourly_part = 0.0
+        upfront_part = 0.0
+        has_price = False
+
+        for dim in reserved_term.get("priceDimensions", {}).values():
+            price = safe_float(dim.get("pricePerUnit", {}).get("USD"))
+            if price is None:
+                continue
+            has_price = True
+            unit = str(dim.get("unit") or "").lower()
+            if "hrs" in unit:
+                hourly_part += price
+            else:
+                upfront_part += price
+
+        if not has_price:
+            continue
+
+        normalized = (upfront_part + hourly_part * term_hours) / term_hours
+        if best is None or normalized < best[0]:
+            best = (normalized, reserved_term, attrs)
+
+    if best is None:
+        return None, {"status": "not_found"}
+
+    normalized, reserved_term, attrs = best
+    return normalized, {
+        "status": "ok",
+        "effectiveDate": reserved_term.get("effectiveDate"),
+        "term": target_length,
+        "purchaseOption": attrs.get("PurchaseOption"),
+        "offeringClass": attrs.get("OfferingClass"),
+        "normalized_by": f"(upfront + hourly * ({years} * 12 * 730)) / ({years} * 12 * 730)",
+    }
+
+
+def _fetch_aws_vm_prices_from_offer_file(instance_type: str, region: str, os_name: str, timeout: int) -> dict[str, Any]:
+    payload, source_url = _aws_load_region_offer_payload(region=region, timeout=timeout)
+    sku = _aws_find_sku(payload=payload, instance_type=instance_type, os_name=os_name)
+
+    if not sku:
+        return {
+            "status": "not_found",
+            "source_url": source_url,
+            "sku_match_mode": "offer_file",
+            "paygo_hourly_usd": None,
+            "ri_1y_hourly_usd": None,
+            "ri_3y_hourly_usd": None,
+            "meta": {"sku": None},
+        }
+
+    paygo, paygo_meta = _aws_pick_paygo_from_offer(payload, sku)
+    ri_1y, ri_1y_meta = _aws_pick_ri_from_offer(payload, sku, 1)
+    ri_3y, ri_3y_meta = _aws_pick_ri_from_offer(payload, sku, 3)
+    status = "ok" if any(v is not None for v in [paygo, ri_1y, ri_3y]) else "not_found"
+
+    return {
+        "status": status,
+        "source_url": source_url,
+        "sku_match_mode": "offer_file",
+        "paygo_hourly_usd": paygo,
+        "ri_1y_hourly_usd": ri_1y,
+        "ri_3y_hourly_usd": ri_3y,
+        "meta": {
+            "sku": sku,
+            "paygo": paygo_meta,
+            "ri_1y": ri_1y_meta,
+            "ri_3y": ri_3y_meta,
+        },
+    }
 
 
 def _aws_pricing_client(timeout: int):
@@ -330,6 +514,14 @@ def _extract_aws_ri(products: list[dict[str, Any]], years: int) -> tuple[float |
 
 def fetch_aws_vm_prices(instance_type: str, region: str, os_name: str, timeout: int) -> dict[str, Any]:
     try:
+        if boto3 is None or Config is None:
+            return _fetch_aws_vm_prices_from_offer_file(
+                instance_type=instance_type,
+                region=region,
+                os_name=os_name,
+                timeout=timeout,
+            )
+
         filters = _aws_base_filters(instance_type, region, os_name)
         products = _aws_get_products(filters=filters, timeout=timeout)
         match_mode = "regionCode"
@@ -376,13 +568,26 @@ def fetch_aws_vm_prices(instance_type: str, region: str, os_name: str, timeout: 
             },
         }
     except Exception as exc:
-        return {
-            "status": "error",
-            "error": str(exc),
-            "paygo_hourly_usd": None,
-            "ri_1y_hourly_usd": None,
-            "ri_3y_hourly_usd": None,
-        }
+        try:
+            fallback = _fetch_aws_vm_prices_from_offer_file(
+                instance_type=instance_type,
+                region=region,
+                os_name=os_name,
+                timeout=timeout,
+            )
+            fallback.setdefault("meta", {})
+            fallback["meta"]["get_products_error"] = str(exc)
+            fallback["meta"]["fallback_reason"] = "get_products_failed"
+            return fallback
+        except Exception as fallback_exc:
+            return {
+                "status": "error",
+                "error": str(exc),
+                "fallback_error": str(fallback_exc),
+                "paygo_hourly_usd": None,
+                "ri_1y_hourly_usd": None,
+                "ri_3y_hourly_usd": None,
+            }
 
 
 def first_non_empty(row: dict[str, Any], keys: list[str], default: Any = None) -> Any:

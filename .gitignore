@@ -13,6 +13,14 @@ data/output/
 ~$*.xlsb
 
 # =========================
+# Generated pricing assets (AUTO-GENERATED)
+# =========================
+.github/skills/vm-pricing-retail-api/assets/aws_ec2_bulk_offers/current/
+.github/skills/vm-pricing-retail-api/assets/aws_ec2_bulk_offers/snapshots/
+.github/skills/vm-pricing-retail-api/assets/aws_ec2_bulk_offers/manifests/
+.github/skills/vm-pricing-retail-api/assets/aws_ec2_bulk_offers/latest.json
+
+# =========================
 # Secrets / Environment
 # =========================
 .env

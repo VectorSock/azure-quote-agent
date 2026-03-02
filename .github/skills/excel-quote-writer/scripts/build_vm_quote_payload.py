@@ -17,10 +17,10 @@ def safe_float(value: Any) -> float | None:
         return None
 
 
-def monthly_cost(hourly: float | None, quantity: float, monthly_hours: float) -> float | None:
+def hourly_total(hourly: float | None, quantity: float) -> float | None:
     if hourly is None:
         return None
-    return round(hourly * quantity * monthly_hours, 4)
+    return round(hourly * quantity, 6)
 
 
 def first_non_empty(row: dict[str, Any], keys: list[str], default: Any = None) -> Any:
@@ -105,12 +105,12 @@ def main() -> None:
                 "billing_unit": "hour",
                 "unit_price_AWS_paygo": aws_paygo,
                 "unit_price_Azure_paygo": azure_paygo,
-                "line_total_AWS_paygo": monthly_cost(aws_paygo, quantity, args.monthly_hours),
-                "line_total_Azure_paygo": monthly_cost(azure_paygo, quantity, args.monthly_hours),
-                "line_total_AWS_1YRI": monthly_cost(aws_1y, quantity, args.monthly_hours),
-                "line_total_AWS_3YRI": monthly_cost(aws_3y, quantity, args.monthly_hours),
-                "line_total_Azure_1YRI": monthly_cost(azure_1y, quantity, args.monthly_hours),
-                "line_total_Azure_3YRI": monthly_cost(azure_3y, quantity, args.monthly_hours),
+                "line_total_AWS_paygo": hourly_total(aws_paygo, quantity),
+                "line_total_Azure_paygo": hourly_total(azure_paygo, quantity),
+                "line_total_AWS_1YRI": hourly_total(aws_1y, quantity),
+                "line_total_AWS_3YRI": hourly_total(aws_3y, quantity),
+                "line_total_Azure_1YRI": hourly_total(azure_1y, quantity),
+                "line_total_Azure_3YRI": hourly_total(azure_3y, quantity),
                 "review_flag": str(first_non_empty(row, ["review_flag"], "")),
                 "review_reason": str(first_non_empty(row, ["review_reason", "pricing_error"], "")),
                 "evidence_id": evidence_id,
@@ -144,10 +144,16 @@ def main() -> None:
 
     assumptions = [
         {
-            "key": "monthly_hours",
-            "value": args.monthly_hours,
+            "key": "line_total_formula",
+            "value": "line_total = hourly_unit_price * quantity",
             "source": "pricing-policy",
-            "notes": "统一口径",
+            "notes": "line_total 字段统一按小时口径，不再乘 730",
+        },
+        {
+            "key": "ri_hourly_normalization",
+            "value": "annual_total / (12 * 730)",
+            "source": "pricing-policy",
+            "notes": "若 RI 为年总价，先折算成小时单价",
         },
         {
             "key": "aws_pricing_available",

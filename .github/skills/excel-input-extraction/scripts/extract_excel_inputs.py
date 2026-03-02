@@ -79,18 +79,32 @@ def normalize_os_name(value: Any) -> str | None:
         return None
 
     lowered = raw.lower()
-    if "windows with sql" in lowered:
-        return "windows"
-    if lowered == "windows with sql server standard":
-        return "windows"
     if "windows" in lowered:
         return "windows"
-    if "suse" in lowered:
+
+    linux_keywords = (
+        "linux",
+        "unix",
+        "ubuntu",
+        "debian",
+        "centos",
+        "suse",
+        "sles",
+        "opensuse",
+        "rhel",
+        "red hat",
+        "rocky",
+        "alma",
+        "almalinux",
+        "amazon linux",
+        "amzn",
+        "oracle linux",
+        "ol",
+        "fedora",
+    )
+    if any(keyword in lowered for keyword in linux_keywords):
         return "linux"
-    if "centos" in lowered:
-        return "linux"
-    if lowered in {"linux/unix", "linux", "unix"}:
-        return "linux"
+
     return raw
 
 
@@ -114,11 +128,37 @@ RESOURCE_TYPE_ALIASES: dict[str, str] = {
     "ec2": "vm",
     "amazon ec2": "vm",
     "amazon elastic compute cloud": "vm",
+    "elastic compute cloud": "vm",
     "ecs": "vm",
+    "elastic compute service": "vm",
+    "aliyun ecs": "vm",
+    "alibaba cloud ecs": "vm",
+    "云服务器 ecs": "vm",
+    "cvm": "vm",
+    "tencent cvm": "vm",
+    "tencent cloud cvm": "vm",
+    "qcloud cvm": "vm",
+    "huawei ecs": "vm",
+    "huawei cloud ecs": "vm",
+    "华为云 ecs": "vm",
+    "gce": "vm",
+    "google compute engine": "vm",
+    "google compute instance": "vm",
+    "compute instance": "vm",
+    "oci compute": "vm",
+    "oci compute instance": "vm",
+    "oracle cloud compute": "vm",
+    "oracle compute": "vm",
     "compute engine": "vm",
+    "virtual server": "vm",
+    "vm instance": "vm",
+    "virtual machine instance": "vm",
     "virtual machine": "vm",
     "virtual_machine": "vm",
     "compute": "vm",
+    "云主机": "vm",
+    "云服务器": "vm",
+    "弹性云服务器": "vm",
     "虚拟机": "vm",
 }
 
@@ -129,7 +169,25 @@ def normalize_resource_type(raw: str) -> str:
     if key in RESOURCE_TYPE_ALIASES:
         return RESOURCE_TYPE_ALIASES[key]
 
-    if any(token in key for token in ["ec2", "elastic compute", "compute engine"]):
+    vm_tokens = [
+        "ec2",
+        "ecs",
+        "elastic compute",
+        "compute engine",
+        "compute instance",
+        "gce",
+        "cvm",
+        "oci compute",
+        "oracle compute",
+        "virtual machine",
+        "vm instance",
+        "virtual server",
+        "云服务器",
+        "云主机",
+        "弹性云服务器",
+        "虚拟机",
+    ]
+    if any(token in key for token in vm_tokens):
         return "vm"
 
     return key

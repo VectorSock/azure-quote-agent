@@ -112,6 +112,10 @@ def infer_provider(provider: str, instance_name: str) -> str:
 
 RESOURCE_TYPE_ALIASES: dict[str, str] = {
     "ec2": "vm",
+    "amazon ec2": "vm",
+    "amazon elastic compute cloud": "vm",
+    "ecs": "vm",
+    "compute engine": "vm",
     "virtual machine": "vm",
     "virtual_machine": "vm",
     "compute": "vm",
@@ -122,7 +126,32 @@ RESOURCE_TYPE_ALIASES: dict[str, str] = {
 def normalize_resource_type(raw: str) -> str:
     """Map common resource-type synonyms to a canonical value."""
     key = raw.strip().lower()
-    return RESOURCE_TYPE_ALIASES.get(key, key)
+    if key in RESOURCE_TYPE_ALIASES:
+        return RESOURCE_TYPE_ALIASES[key]
+
+    if any(token in key for token in ["ec2", "elastic compute", "compute engine"]):
+        return "vm"
+
+    return key
+
+
+def normalize_instance_type(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+
+    if AWS_INSTANCE_RE.match(text):
+        return text
+
+    candidate = text.split()[0].strip().rstrip(",;)")
+    if AWS_INSTANCE_RE.match(candidate):
+        return candidate
+
+    match = re.search(r"([a-z][a-z0-9]*\d+[a-z0-9]*\.[a-z0-9]+)", text, re.IGNORECASE)
+    if match:
+        return match.group(1)
+
+    return text
 
 
 def infer_resource_type(resource_type: str, instance_name: str) -> str:
@@ -233,7 +262,7 @@ def extract_aws_vm(record: Any) -> dict[str, Any] | None:
         return None
 
     row = base
-    row["instance_type"] = instance_name
+    row["instance_type"] = normalize_instance_type(instance_name)
     return row
 
 

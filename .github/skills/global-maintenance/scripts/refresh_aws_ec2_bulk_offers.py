@@ -65,7 +65,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--regions-excel",
-        default=".github/skills/region-mapping/assets/get_regions.xlsx",
+        default=".github/skills/global-region-mapping/assets/get_regions.xlsx",
         help="Path to get_regions.xlsx",
     )
     parser.add_argument(

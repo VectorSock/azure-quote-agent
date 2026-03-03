@@ -1,5 +1,5 @@
 ---
-name: region-mapping
+name: global-region-mapping
 description: 标准化模糊位置并映射到 AWS/Azure/GCP 官方 Region ID；在云报价、迁移或多云比对前优先使用。
 ---
 
@@ -22,17 +22,17 @@ description: 标准化模糊位置并映射到 AWS/Azure/GCP 官方 Region ID；
 支持项目根目录下的相对路径（如 `input/...`、`output/...`），也支持绝对路径。
 
 ### 单条查询
-`python .github/skills/region-mapping/scripts/region_mapping.py --location "Singapore"`
+`python .github/skills/global-region-mapping/scripts/region_mapping.py --location "Singapore"`
 
 ### 批量映射
-`python .github/skills/region-mapping/scripts/region_mapping.py --input-file "input/locations.csv" --column "region" --output "output/mapped_results.csv"`
+`python .github/skills/global-region-mapping/scripts/region_mapping.py --input-file "input/locations.csv" --column "region" --output "output/mapped_results.csv"`
 
 ## 参数说明
 - `--location`：单条输入（城市 / region / long name）。
 - `--input-file`：批量输入文件（`.csv` / `.xlsx` / `.xls`）。
 - `--column`：批量模式的位置列名；不传则自动探测：`region`、`location`、`city`、`site`（含常见中文列名）。
 - `--output`：批量输出路径（默认 `output/region_mapping_results.csv`）。
-- `--mapping-file`：映射表路径；未传时优先使用 `.github/skills/region-mapping/assets/get_regions.xlsx`，其次 `data/get_regions.xlsx`。
+- `--mapping-file`：映射表路径；未传时优先使用 `.github/skills/global-region-mapping/assets/get_regions.xlsx`，其次 `data/get_regions.xlsx`。
 - `--default-azure-region`：回退 Azure Region（默认 `eastasia`）。
 
 ## 执行规则

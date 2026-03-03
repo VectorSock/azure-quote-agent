@@ -16,9 +16,9 @@ defaults:
   quote_output_name: quote_result.xlsx
 steps:
   - id: step_01_extract
-    script: .github/skills/excel-input-extraction/scripts/extract_excel_inputs.py
+    script: .github/skills/input-excel-extraction/scripts/extract_excel_inputs.py
   - id: step_02_region_mapping
-    script: .github/skills/region-mapping/scripts/region_mapping.py
+    script: .github/skills/global-region-mapping/scripts/region_mapping.py
   - id: step_03_aws_instance_to_config
     script: .github/skills/vm-aws-instance-to-config/scripts/aws_instance_indicators.py
   - id: step_04_config_to_azure_instance
@@ -26,6 +26,6 @@ steps:
   - id: step_05_pricing
     script: .github/skills/vm-pricing-retail-api/scripts/fetch_vm_prices.py
   - id: step_06_build_quote_payload
-    script: .github/skills/excel-quote-writer/scripts/build_vm_quote_payload.py
+    script: .github/skills/global-quote-writer/scripts/build_vm_quote_payload.py
   - id: step_07_write_quote_excel
-    script: .github/skills/excel-quote-writer/scripts/write_quote_excel.py
+    script: .github/skills/global-quote-writer/scripts/write_quote_excel.py

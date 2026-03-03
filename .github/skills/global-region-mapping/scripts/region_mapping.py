@@ -237,8 +237,8 @@ def resolve_mapping_file(path_arg: str | None) -> Path:
         return path if path.is_absolute() else resolve_project_root() / path
 
     candidates = [
-        resolve_project_root() / ".github" / "skills" / "region-mapping" / "assets" / "get_regions.xlsx",
-        resolve_project_root() / "skills" / "region-mapping" / "assets" / "get_regions.xlsx",
+        resolve_project_root() / ".github" / "skills" / "global-region-mapping" / "assets" / "get_regions.xlsx",
+        resolve_project_root() / "skills" / "global-region-mapping" / "assets" / "get_regions.xlsx",
         resolve_project_root() / "data" / "get_regions.xlsx",
         Path(__file__).resolve().parents[1] / "assets" / "get_regions.xlsx",
     ]
@@ -356,7 +356,7 @@ def main() -> None:
     mapping_file = resolve_mapping_file(args.mapping_file)
     if not mapping_file.exists():
         raise FileNotFoundError(
-            "未找到映射表，请提供 --mapping-file 或确认 skills/region-mapping/assets/get_regions.xlsx 存在"
+            "未找到映射表，请提供 --mapping-file 或确认 skills/global-region-mapping/assets/get_regions.xlsx 存在"
         )
 
     resolver = RegionResolver.from_excel(mapping_file)

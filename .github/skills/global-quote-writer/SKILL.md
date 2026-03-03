@@ -1,5 +1,5 @@
 ---
-name: excel-quote-writer
+name: global-quote-writer
 description: 将结构化报价结果写入标准 Excel 报价文件（Summary/LineItems/Assumptions/Evidence），用于交付、复核与审计留痕。
 ---
 
@@ -17,13 +17,13 @@ description: 将结构化报价结果写入标准 Excel 报价文件（Summary/L
 ## 运行方式
 
 ### 1) 初始化模板（首次使用）
-`python .github/skills/excel-quote-writer/scripts/write_quote_excel.py --init-template --template .github/skills/excel-quote-writer/assets/summary-layout-template.xlsx`
+`python .github/skills/global-quote-writer/scripts/write_quote_excel.py --init-template --template .github/skills/global-quote-writer/assets/summary-layout-template.xlsx`
 
 ### 2) 根据输入 JSON 生成报价 Excel
-`python .github/skills/excel-quote-writer/scripts/write_quote_excel.py --input-json output/quote_payload.json --output-xlsx output/quote_result.xlsx --template .github/skills/excel-quote-writer/assets/summary-layout-template.xlsx`
+`python .github/skills/global-quote-writer/scripts/write_quote_excel.py --input-json output/quote_payload.json --output-xlsx output/quote_result.xlsx --template .github/skills/global-quote-writer/assets/summary-layout-template.xlsx`
 
 ### 2a)（可选）从 VM 流水线 CSV 生成 quote_payload.json
-`python .github/skills/excel-quote-writer/scripts/build_vm_quote_payload.py --input-csv output/vm_pricing_results.csv --output-json output/quote_payload.json --customer-project "Project A" --region "Singapore"`
+`python .github/skills/global-quote-writer/scripts/build_vm_quote_payload.py --input-csv output/vm_pricing_results.csv --output-json output/quote_payload.json --customer-project "Project A" --region "Singapore"`
 
 ## 输入要求
 `--input-json` 需符合 `references/guide-input-schema.md`。

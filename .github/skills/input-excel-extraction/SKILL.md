@@ -1,5 +1,5 @@
 ---
-name: excel-input-extraction
+name: input-excel-extraction
 description: 从原始 Excel 中做第一步结构化抽取，输出标准化中间数据供后续各类云资源 skill 复用。
 ---
 
@@ -22,13 +22,13 @@ description: 从原始 Excel 中做第一步结构化抽取，输出标准化中
 所有路径默认基于当前工作目录。
 
 ### 标准抽取（默认 profile: `aws_vm`）
-`python .github/skills/excel-input-extraction/scripts/extract_excel_inputs.py --input-excel "input/sample_input.xlsx" --output "output/extracted_inputs.csv"`
+`python .github/skills/input-excel-extraction/scripts/extract_excel_inputs.py --input-excel "input/sample_input.xlsx" --output "output/extracted_inputs.csv"`
 
 ### 通用抽取（保留所有资源类型）
-`python .github/skills/excel-input-extraction/scripts/extract_excel_inputs.py --input-excel "input/sample_input.xlsx" --profile all_resources --output "output/extracted_all_resources.csv"`
+`python .github/skills/input-excel-extraction/scripts/extract_excel_inputs.py --input-excel "input/sample_input.xlsx" --profile all_resources --output "output/extracted_all_resources.csv"`
 
 ### 过滤抽取（按 provider / resource_type）
-`python .github/skills/excel-input-extraction/scripts/extract_excel_inputs.py --input-excel "input/sample_input.xlsx" --profile all_resources --provider aws --resource-type vm --output "output/aws_vm_rows.csv"`
+`python .github/skills/input-excel-extraction/scripts/extract_excel_inputs.py --input-excel "input/sample_input.xlsx" --profile all_resources --provider aws --resource-type vm --output "output/aws_vm_rows.csv"`
 
 ## 参数说明
 - `--input-excel`：输入 Excel 路径（`.xlsx` / `.xls`）。

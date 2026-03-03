@@ -12,7 +12,7 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / ".github/skills/vm-quote-pipeline-runner/assets/defaults.yaml"
-DEFAULT_TEMPLATE = PROJECT_ROOT / ".github/skills/excel-quote-writer/assets/summary-layout-template.xlsx"
+DEFAULT_TEMPLATE = PROJECT_ROOT / ".github/skills/global-quote-writer/assets/summary-layout-template.xlsx"
 
 
 @dataclass(frozen=True)
@@ -22,13 +22,13 @@ class Step:
 
 
 DEFAULT_STEPS: list[Step] = [
-    Step("step_01_extract", ".github/skills/excel-input-extraction/scripts/extract_excel_inputs.py"),
-    Step("step_02_region_mapping", ".github/skills/region-mapping/scripts/region_mapping.py"),
+    Step("step_01_extract", ".github/skills/input-excel-extraction/scripts/extract_excel_inputs.py"),
+    Step("step_02_region_mapping", ".github/skills/global-region-mapping/scripts/region_mapping.py"),
     Step("step_03_aws_instance_to_config", ".github/skills/vm-aws-instance-to-config/scripts/aws_instance_indicators.py"),
     Step("step_04_config_to_azure_instance", ".github/skills/vm-config-to-azure-instance/scripts/vm-config-to-azure-instance.py"),
     Step("step_05_pricing", ".github/skills/vm-pricing-retail-api/scripts/fetch_vm_prices.py"),
-    Step("step_06_build_quote_payload", ".github/skills/excel-quote-writer/scripts/build_vm_quote_payload.py"),
-    Step("step_07_write_quote_excel", ".github/skills/excel-quote-writer/scripts/write_quote_excel.py"),
+    Step("step_06_build_quote_payload", ".github/skills/global-quote-writer/scripts/build_vm_quote_payload.py"),
+    Step("step_07_write_quote_excel", ".github/skills/global-quote-writer/scripts/write_quote_excel.py"),
 ]
 
 

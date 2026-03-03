@@ -3,14 +3,14 @@
 本文档定义 VM 报价流水线中各 skill 的关键输入/输出列契约，避免“上游有值、下游读不到”的问题。
 
 ## 流水线顺序
-1. `excel-input-extraction`
-2. `region-mapping`
+1. `input-excel-extraction`
+2. `global-region-mapping`
 3. `vm-aws-instance-to-config`
 4. `vm-config-to-azure-instance`
 5. `vm-pricing-retail-api`
-6. `excel-quote-writer`
+6. `global-quote-writer`
 
-## Step 1: excel-input-extraction
+## Step 1: input-excel-extraction
 
 ### 关键输出列
 - `nrm_id`
@@ -27,10 +27,10 @@
 - `status_reason`
 
 ### 下游依赖
-- `region-mapping` 依赖：`region_input`
+- `global-region-mapping` 依赖：`region_input`
 - `vm-aws-instance-to-config` 依赖：`instance_type`
 
-## Step 2: region-mapping
+## Step 2: global-region-mapping
 
 ### 追加输出列
 - `mapped_city`
@@ -99,7 +99,7 @@
 - `pricing_error`
 - `pricing_result_json`
 
-## Step 6: excel-quote-writer
+## Step 6: global-quote-writer
 
 ### 关键输入对象
 - 顶层：`summary`、`line_items`

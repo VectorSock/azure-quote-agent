@@ -440,7 +440,7 @@ def main() -> None:
     parser.add_argument("--output-xlsx", help="Output Excel path.")
     parser.add_argument(
         "--template",
-        default=".github/skills/excel-quote-writer/assets/summary-layout-template.xlsx",
+        default=".github/skills/global-quote-writer/assets/summary-layout-template.xlsx",
         help="Template workbook path.",
     )
     parser.add_argument("--init-template", action="store_true", help="Initialize template workbook and exit.")

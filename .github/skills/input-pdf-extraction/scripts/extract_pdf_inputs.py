@@ -201,7 +201,8 @@ def classify_vm_billing_line(line: str) -> tuple[bool, str]:
 def parse_pdf_with_document_intelligence(
     input_pdf: Path,
     endpoint: str,
-    key: str,
+    key: str | None,
+    auth_mode: str,
     model_id: str,
 ) -> tuple[list[str], dict[str, Any]]:
     try:
@@ -217,7 +218,19 @@ def parse_pdf_with_document_intelligence(
     AnalyzeDocumentRequest = getattr(di_models_module, "AnalyzeDocumentRequest")
     AzureKeyCredential = getattr(azure_core_module, "AzureKeyCredential")
 
-    client = DocumentIntelligenceClient(endpoint=endpoint, credential=AzureKeyCredential(key))
+    if auth_mode == "aad":
+        try:
+            azure_identity_module = importlib.import_module("azure.identity")
+        except ImportError as exc:
+            raise ImportError(
+                "Missing dependency `azure-identity` for AAD auth. Install with: pip install azure-identity"
+            ) from exc
+        DefaultAzureCredential = getattr(azure_identity_module, "DefaultAzureCredential")
+        client = DocumentIntelligenceClient(endpoint=endpoint, credential=DefaultAzureCredential())
+    else:
+        if not key:
+            raise ValueError("Document Intelligence API key is required when auth_mode=key")
+        client = DocumentIntelligenceClient(endpoint=endpoint, credential=AzureKeyCredential(key))
 
     with input_pdf.open("rb") as fp:
         poller = client.begin_analyze_document(
@@ -381,6 +394,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resource-type", help="Optional resource_type filter, e.g. vm/storage/db")
     parser.add_argument("--endpoint", help="Azure Document Intelligence endpoint")
     parser.add_argument("--key", help="Azure Document Intelligence key")
+    parser.add_argument(
+        "--auth-mode",
+        choices=["auto", "key", "aad"],
+        default="auto",
+        help="Authentication mode: auto (prefer key when provided, else AAD), key, or aad",
+    )
     parser.add_argument("--model-id", default="prebuilt-layout", help="Document Intelligence model id")
     return parser.parse_args()
 
@@ -396,16 +415,32 @@ def main() -> None:
 
     endpoint = args.endpoint or os.getenv("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT")
     key = args.key or os.getenv("AZURE_DOCUMENT_INTELLIGENCE_KEY")
-    if not endpoint or not key:
+
+    auth_mode = (args.auth_mode or os.getenv("AZURE_DOCUMENT_INTELLIGENCE_AUTH_MODE") or "auto").strip().lower()
+    if auth_mode not in {"auto", "key", "aad"}:
+        raise ValueError("Invalid auth mode. Expected one of: auto, key, aad")
+
+    if not endpoint:
         raise ValueError(
-            "Document Intelligence credentials required. Provide --endpoint/--key or set "
-            "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT and AZURE_DOCUMENT_INTELLIGENCE_KEY."
+            "Document Intelligence endpoint required. Provide --endpoint or set "
+            "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT."
+        )
+
+    resolved_auth_mode = auth_mode
+    if auth_mode == "auto":
+        resolved_auth_mode = "key" if key else "aad"
+
+    if resolved_auth_mode == "key" and not key:
+        raise ValueError(
+            "Document Intelligence API key required for key auth. Provide --key or set "
+            "AZURE_DOCUMENT_INTELLIGENCE_KEY, or switch to --auth-mode aad."
         )
 
     lines, di_meta = parse_pdf_with_document_intelligence(
         input_pdf=input_pdf,
         endpoint=endpoint,
         key=key,
+        auth_mode=resolved_auth_mode,
         model_id=args.model_id,
     )
 
@@ -470,6 +505,7 @@ def main() -> None:
                 "required_for_next_skill": profile_required[args.profile],
                 "recommended_columns": profile_recommended[args.profile],
                 "di_meta": di_meta,
+                "auth_mode": resolved_auth_mode,
                 "parse_stats": parse_stats,
             },
             ensure_ascii=False,

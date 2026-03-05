@@ -17,10 +17,9 @@ def safe_float(value: Any) -> float | None:
         return None
 
 
-def hourly_total(hourly: float | None, quantity: float) -> float | None:
-    if hourly is None:
-        return None
-    return round(hourly * quantity, 6)
+def safe_bool(value: Any) -> bool:
+    token = str(value or "").strip().lower()
+    return token in {"1", "true", "yes", "y", "on"}
 
 
 def first_non_empty(row: dict[str, Any], keys: list[str], default: Any = None) -> Any:
@@ -69,18 +68,25 @@ def main() -> None:
 
     aws_available = False
     azure_available = False
+    input_provider_present = False
 
     for idx, row in enumerate(rows, start=1):
         quantity = safe_float(first_non_empty(row, ["quantity"], 1)) or 1.0
         os_name = str(first_non_empty(row, ["os"], "linux")).strip().lower()
+        provider_from_input = safe_bool(first_non_empty(row, ["provider_from_input"], False))
+        if provider_from_input:
+            input_provider_present = True
 
-        aws_paygo = safe_float(first_non_empty(row, ["aws_paygo_hourly_usd", "unit_price_AWS_paygo"]))
-        aws_1y = safe_float(first_non_empty(row, ["aws_ri_1y_hourly_usd"]))
-        aws_3y = safe_float(first_non_empty(row, ["aws_ri_3y_hourly_usd"]))
+        aws_paygo = safe_float(first_non_empty(row, ["AWS_paygo", "aws_paygo_hourly_usd", "unit_price_AWS_paygo"]))
+        aws_1y = safe_float(first_non_empty(row, ["AWS_1YRI", "aws_ri_1y_hourly_usd"]))
+        aws_3y = safe_float(first_non_empty(row, ["AWS_3YRI", "aws_ri_3y_hourly_usd"]))
 
-        azure_paygo = safe_float(first_non_empty(row, ["azure_paygo_hourly_usd", "unit_price_Azure_paygo"]))
-        azure_1y = safe_float(first_non_empty(row, ["azure_ri_1y_hourly_usd"]))
-        azure_3y = safe_float(first_non_empty(row, ["azure_ri_3y_hourly_usd"]))
+        azure_paygo = safe_float(first_non_empty(row, ["Azure_paygo", "azure_paygo_hourly_usd", "unit_price_Azure_paygo"]))
+        azure_1y = safe_float(first_non_empty(row, ["Azure_1YRI", "azure_ri_1y_hourly_usd"]))
+        azure_3y = safe_float(first_non_empty(row, ["Azure_3YRI", "azure_ri_3y_hourly_usd"]))
+        sap_azure_paygo = safe_float(first_non_empty(row, ["Azure_SAP_paygo", "sap_azure_paygo_hourly_usd"]))
+        sap_azure_1y = safe_float(first_non_empty(row, ["Azure_SAP_1YRI", "sap_azure_ri_1y_hourly_usd"]))
+        sap_azure_3y = safe_float(first_non_empty(row, ["Azure_SAP_3YRI", "sap_azure_ri_3y_hourly_usd"]))
 
         if any(value is not None for value in [aws_paygo, aws_1y, aws_3y]):
             aws_available = True
@@ -92,25 +98,34 @@ def main() -> None:
 
         line_items.append(
             {
-                "item_id": item_id,
-                "provider": str(first_non_empty(row, ["provider"], "aws")),
                 "resource_type": str(first_non_empty(row, ["resource_type", "service"], "vm")),
+                "system": str(first_non_empty(row, ["system"], "")),
+                "env": str(first_non_empty(row, ["env", "environment"], "")),
+                "SAP_workload": str(first_non_empty(row, ["SAP_workload", "sap_workload"], "")),
+                "workload_type": str(first_non_empty(row, ["workload_type"], "")),
+                "vcpu": safe_float(first_non_empty(row, ["vcpu", "parsed_vcpu"], None)),
+                "memory_gb": safe_float(first_non_empty(row, ["memory_gb", "parsed_memory_gb"], None)),
+                "disk": str(first_non_empty(row, ["disk"], "")),
                 "quantity": int(quantity) if float(quantity).is_integer() else quantity,
+                "os": os_name,
+                "region": str(first_non_empty(row, ["region", "region_input"], "")),
+                "item_id": item_id,
+                "provider": str(first_non_empty(row, ["provider"], "")),
                 "sku/os": os_name,
-                "region": str(first_non_empty(row, ["mapped_aws_region", "aws_region", "region", "region_aws"], "")),
                 "region_azure": str(first_non_empty(row, ["mapped_azure_region", "azure_region", "region_azure"], "")),
                 "primary_sku": str(first_non_empty(row, ["primary_sku", "azure_sku"], "")),
-                "fallback_skus": str(first_non_empty(row, ["fallback_skus"], "")),
+                "fallback_sku": str(first_non_empty(row, ["fallback_sku", "fallback_skus"], "")),
                 "sap_sku": str(first_non_empty(row, ["sap_sku"], "")),
                 "billing_unit": "hour",
-                "unit_price_AWS_paygo": aws_paygo,
-                "unit_price_Azure_paygo": azure_paygo,
-                "line_total_AWS_paygo": hourly_total(aws_paygo, quantity),
-                "line_total_Azure_paygo": hourly_total(azure_paygo, quantity),
-                "line_total_AWS_1YRI": hourly_total(aws_1y, quantity),
-                "line_total_AWS_3YRI": hourly_total(aws_3y, quantity),
-                "line_total_Azure_1YRI": hourly_total(azure_1y, quantity),
-                "line_total_Azure_3YRI": hourly_total(azure_3y, quantity),
+                "AWS_paygo": aws_paygo,
+                "AWS_1YRI": aws_1y,
+                "AWS_3YRI": aws_3y,
+                "Azure_paygo": azure_paygo,
+                "Azure_1YRI": azure_1y,
+                "Azure_3YRI": azure_3y,
+                "Azure_SAP_paygo": sap_azure_paygo,
+                "Azure_SAP_1YRI": sap_azure_1y,
+                "Azure_SAP_3YRI": sap_azure_3y,
                 "review_flag": str(first_non_empty(row, ["review_flag"], "")),
                 "review_reason": str(first_non_empty(row, ["review_reason", "pricing_error"], "")),
                 "evidence_id": evidence_id,
@@ -144,10 +159,10 @@ def main() -> None:
 
     assumptions = [
         {
-            "key": "line_total_formula",
-            "value": "line_total = hourly_unit_price * quantity",
+            "key": "hourly_price_only",
+            "value": True,
             "source": "pricing-policy",
-            "notes": "line_total 字段统一按小时口径，不再乘 730",
+            "notes": "报价仅输出小时单价，不再输出 line total",
         },
         {
             "key": "ri_hourly_normalization",
@@ -174,6 +189,7 @@ def main() -> None:
         "region": args.region,
         "currency": args.currency,
         "competitor_cloud": args.competitor_cloud,
+        "input_provider_present": input_provider_present,
         "pricing_source_date": datetime.now().strftime("%Y-%m-%d"),
         "pricing_source_note": args.pricing_source_note,
     }

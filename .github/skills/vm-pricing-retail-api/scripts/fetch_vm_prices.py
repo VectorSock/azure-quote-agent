@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 try:
     import boto3
     from botocore.config import Config
@@ -176,9 +178,46 @@ def aws_os_name(os_name: str) -> str:
 
 _AWS_REGION_INDEX_CACHE: dict[str, Any] | None = None
 _AWS_REGION_PAYLOAD_CACHE: dict[str, dict[str, Any]] = {}
+_AWS_LOCATION_NAME_CACHE: dict[str, str] | None = None
+
+
+def resolve_project_root() -> Path:
+    return Path(__file__).resolve().parents[4]
+
+
+def _load_aws_location_mapping_from_asset() -> dict[str, str]:
+    mapping_file = resolve_project_root() / ".github" / "skills" / "global-region-mapping" / "assets" / "get_regions.xlsx"
+    if not mapping_file.exists():
+        return {}
+
+    try:
+        df = pd.read_excel(mapping_file)
+    except Exception:  # noqa: BLE001
+        return {}
+
+    required = {"Cloud", "Region", "Region Long Name"}
+    if not required.issubset(set(df.columns)):
+        return {}
+
+    mapping: dict[str, str] = {}
+    for _, row in df.iterrows():
+        cloud = str(row.get("Cloud") or "").strip().lower()
+        region = str(row.get("Region") or "").strip().lower()
+        region_long_name = str(row.get("Region Long Name") or "").strip()
+        if cloud == "aws" and region and region_long_name:
+            mapping[region] = region_long_name
+    return mapping
 
 
 def _aws_region_location_name(region: str) -> str:
+    global _AWS_LOCATION_NAME_CACHE
+    if _AWS_LOCATION_NAME_CACHE is None:
+        _AWS_LOCATION_NAME_CACHE = _load_aws_location_mapping_from_asset()
+
+    region_key = str(region or "").strip().lower()
+    if region_key in _AWS_LOCATION_NAME_CACHE:
+        return _AWS_LOCATION_NAME_CACHE[region_key]
+
     mapping = {
         "us-east-1": "US East (N. Virginia)",
         "us-east-2": "US East (Ohio)",
@@ -194,7 +233,7 @@ def _aws_region_location_name(region: str) -> str:
         "eu-west-2": "EU (London)",
         "eu-central-1": "EU (Frankfurt)",
     }
-    return mapping.get(region, region)
+    return mapping.get(region_key, region)
 
 
 def _aws_load_region_index(timeout: int) -> dict[str, Any]:
@@ -695,6 +734,7 @@ def main() -> None:
             aws_instance_type = first_non_empty(row, ["aws_instance_type", "instance_type"])
             aws_region = first_non_empty(row, ["aws_region", "mapped_aws_region", "region_aws"])
             azure_sku = first_non_empty(row, ["azure_sku", "primary_sku"])
+            sap_sku = first_non_empty(row, ["sap_sku"])
             azure_region = first_non_empty(row, ["azure_region", "mapped_azure_region", "region_azure"])
             os_name = normalize_os(first_non_empty(row, ["os"], "linux"))
 
@@ -727,21 +767,30 @@ def main() -> None:
                     skip_azure=skip_azure,
                 )
 
+            sap_azure: dict[str, Any] = {"status": "skipped"}
+            if sap_sku and azure_region:
+                sap_azure = fetch_azure_vm_prices(str(sap_sku), str(azure_region), os_name, args.timeout)
+
             merged = dict(row)
             merged.update(
                 {
                     "pricing_status": result.get("status"),
                     "azure_status": result.get("azure", {}).get("status"),
-                    "azure_paygo_hourly_usd": result.get("azure", {}).get("paygo_hourly_usd"),
-                    "azure_ri_1y_hourly_usd": result.get("azure", {}).get("ri_1y_hourly_usd"),
-                    "azure_ri_3y_hourly_usd": result.get("azure", {}).get("ri_3y_hourly_usd"),
+                    "Azure_paygo": result.get("azure", {}).get("paygo_hourly_usd"),
+                    "Azure_1YRI": result.get("azure", {}).get("ri_1y_hourly_usd"),
+                    "Azure_3YRI": result.get("azure", {}).get("ri_3y_hourly_usd"),
+                    "sap_azure_status": sap_azure.get("status"),
+                    "Azure_SAP_paygo": sap_azure.get("paygo_hourly_usd"),
+                    "Azure_SAP_1YRI": sap_azure.get("ri_1y_hourly_usd"),
+                    "Azure_SAP_3YRI": sap_azure.get("ri_3y_hourly_usd"),
                     "aws_status": result.get("aws", {}).get("status"),
-                    "aws_paygo_hourly_usd": result.get("aws", {}).get("paygo_hourly_usd"),
-                    "aws_ri_1y_hourly_usd": result.get("aws", {}).get("ri_1y_hourly_usd"),
-                    "aws_ri_3y_hourly_usd": result.get("aws", {}).get("ri_3y_hourly_usd"),
+                    "AWS_paygo": result.get("aws", {}).get("paygo_hourly_usd"),
+                    "AWS_1YRI": result.get("aws", {}).get("ri_1y_hourly_usd"),
+                    "AWS_3YRI": result.get("aws", {}).get("ri_3y_hourly_usd"),
                     "pricing_error": result.get("error")
                     or result.get("aws", {}).get("error")
-                    or result.get("azure", {}).get("error"),
+                    or result.get("azure", {}).get("error")
+                    or sap_azure.get("error"),
                     "pricing_result_json": json.dumps(result, ensure_ascii=False),
                 }
             )

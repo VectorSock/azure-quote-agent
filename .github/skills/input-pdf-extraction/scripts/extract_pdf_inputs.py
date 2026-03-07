@@ -6,6 +6,7 @@ import importlib
 import json
 import os
 import re
+import subprocess
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -83,6 +84,79 @@ def resolve_path(path_str: str) -> Path:
     if path.is_absolute():
         return path
     return PROJECT_ROOT / path
+
+
+def load_dotenv_vars(env_file: Path) -> dict[str, str]:
+    """Load key=value pairs from a .env file (best-effort, no interpolation)."""
+    if not env_file.exists():
+        return {}
+
+    values: dict[str, str] = {}
+    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            values[key] = value
+    return values
+
+
+def discover_di_endpoint_via_az(
+    *,
+    subscription_id: str | None,
+    resource_group: str | None,
+    account_name: str | None,
+) -> str | None:
+    """Try to discover one Document Intelligence endpoint from current az login context."""
+    command = ["az", "cognitiveservices", "account", "list", "-o", "json"]
+    if subscription_id:
+        command.extend(["--subscription", subscription_id])
+
+    try:
+        proc = subprocess.run(command, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        return None
+
+    if proc.returncode != 0:
+        return None
+
+    try:
+        payload = json.loads(proc.stdout or "[]")
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(payload, list):
+        return None
+
+    candidates: list[str] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "").strip().lower()
+        if kind not in {"formrecognizer", "documentintelligence"}:
+            continue
+
+        rg = str(item.get("resourceGroup") or "").strip().lower()
+        name = str(item.get("name") or "").strip().lower()
+
+        if resource_group and rg != resource_group.strip().lower():
+            continue
+        if account_name and name != account_name.strip().lower():
+            continue
+
+        props = item.get("properties") or {}
+        endpoint = str(props.get("endpoint") or "").strip()
+        if endpoint:
+            candidates.append(endpoint)
+
+    unique_candidates = sorted(set(candidates))
+    if len(unique_candidates) == 1:
+        return unique_candidates[0]
+
+    return None
 
 
 def normalize_text(value: Any) -> str:
@@ -201,7 +275,8 @@ def classify_vm_billing_line(line: str) -> tuple[bool, str]:
 def parse_pdf_with_document_intelligence(
     input_pdf: Path,
     endpoint: str,
-    key: str,
+    key: str | None,
+    auth_mode: str,
     model_id: str,
 ) -> tuple[list[str], dict[str, Any]]:
     try:
@@ -217,7 +292,19 @@ def parse_pdf_with_document_intelligence(
     AnalyzeDocumentRequest = getattr(di_models_module, "AnalyzeDocumentRequest")
     AzureKeyCredential = getattr(azure_core_module, "AzureKeyCredential")
 
-    client = DocumentIntelligenceClient(endpoint=endpoint, credential=AzureKeyCredential(key))
+    if auth_mode == "aad":
+        try:
+            azure_identity_module = importlib.import_module("azure.identity")
+        except ImportError as exc:
+            raise ImportError(
+                "Missing dependency `azure-identity` for AAD auth. Install with: pip install azure-identity"
+            ) from exc
+        DefaultAzureCredential = getattr(azure_identity_module, "DefaultAzureCredential")
+        client = DocumentIntelligenceClient(endpoint=endpoint, credential=DefaultAzureCredential())
+    else:
+        if not key:
+            raise ValueError("Document Intelligence API key is required when auth_mode=key")
+        client = DocumentIntelligenceClient(endpoint=endpoint, credential=AzureKeyCredential(key))
 
     with input_pdf.open("rb") as fp:
         poller = client.begin_analyze_document(
@@ -381,6 +468,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resource-type", help="Optional resource_type filter, e.g. vm/storage/db")
     parser.add_argument("--endpoint", help="Azure Document Intelligence endpoint")
     parser.add_argument("--key", help="Azure Document Intelligence key")
+    parser.add_argument("--env-file", default=".env", help="Path to .env file (default: .env at project root)")
+    parser.add_argument(
+        "--auth-mode",
+        choices=["auto", "key", "aad"],
+        default="auto",
+        help="Authentication mode: auto (prefer key when provided, else AAD), key, or aad",
+    )
+    parser.add_argument("--subscription-id", help="Azure subscription id for endpoint auto-discovery via az cli")
+    parser.add_argument("--resource-group", help="Azure resource group for endpoint auto-discovery via az cli")
+    parser.add_argument("--account-name", help="Document Intelligence account name for endpoint auto-discovery")
     parser.add_argument("--model-id", default="prebuilt-layout", help="Document Intelligence model id")
     return parser.parse_args()
 
@@ -394,18 +491,51 @@ def main() -> None:
     if not input_pdf.exists():
         raise FileNotFoundError(f"Input PDF not found: {input_pdf.as_posix()}")
 
-    endpoint = args.endpoint or os.getenv("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT")
-    key = args.key or os.getenv("AZURE_DOCUMENT_INTELLIGENCE_KEY")
-    if not endpoint or not key:
+    env_file = resolve_path(args.env_file)
+    dotenv_vars = load_dotenv_vars(env_file)
+
+    # Priority: CLI args > .env values > process environment
+    endpoint = args.endpoint or dotenv_vars.get("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT") or os.getenv("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT")
+    key = args.key or dotenv_vars.get("AZURE_DOCUMENT_INTELLIGENCE_KEY") or os.getenv("AZURE_DOCUMENT_INTELLIGENCE_KEY")
+
+    auth_mode = (
+        args.auth_mode
+        or dotenv_vars.get("AZURE_DOCUMENT_INTELLIGENCE_AUTH_MODE")
+        or os.getenv("AZURE_DOCUMENT_INTELLIGENCE_AUTH_MODE")
+        or "auto"
+    ).strip().lower()
+    if auth_mode not in {"auto", "key", "aad"}:
+        raise ValueError("Invalid auth mode. Expected one of: auto, key, aad")
+
+    resolved_auth_mode = auth_mode
+    if auth_mode == "auto":
+        resolved_auth_mode = "key" if (endpoint and key) else "aad"
+
+    if resolved_auth_mode == "key" and not key:
         raise ValueError(
-            "Document Intelligence credentials required. Provide --endpoint/--key or set "
-            "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT and AZURE_DOCUMENT_INTELLIGENCE_KEY."
+            "Document Intelligence API key required for key auth. Provide --key or set "
+            "AZURE_DOCUMENT_INTELLIGENCE_KEY, or switch to --auth-mode aad."
+        )
+
+    if not endpoint and resolved_auth_mode == "aad":
+        endpoint = discover_di_endpoint_via_az(
+            subscription_id=args.subscription_id,
+            resource_group=args.resource_group,
+            account_name=args.account_name,
+        )
+
+    if not endpoint:
+        raise ValueError(
+            "Document Intelligence endpoint required. Provide --endpoint, put "
+            "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT in .env/env, or sign in with az login and "
+            "ensure exactly one DI account is discoverable (or pass --subscription-id/--resource-group/--account-name)."
         )
 
     lines, di_meta = parse_pdf_with_document_intelligence(
         input_pdf=input_pdf,
         endpoint=endpoint,
         key=key,
+        auth_mode=resolved_auth_mode,
         model_id=args.model_id,
     )
 
@@ -470,6 +600,7 @@ def main() -> None:
                 "required_for_next_skill": profile_required[args.profile],
                 "recommended_columns": profile_recommended[args.profile],
                 "di_meta": di_meta,
+                "auth_mode": resolved_auth_mode,
                 "parse_stats": parse_stats,
             },
             ensure_ascii=False,

@@ -3,11 +3,14 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+import pandas as pd
 
 try:
     import boto3
@@ -88,9 +91,89 @@ def azure_os_match(item: dict[str, Any], os_name: str) -> bool:
     return "windows" not in text
 
 
+def azure_family_prefix(sku: str) -> str:
+    token = str(sku or "").strip()
+    if not token:
+        return token
+
+    # Standard_E4as_v5 -> Standard_E4as_
+    version_suffix = re.search(r"(?i)^(.*)_v\d+$", token)
+    if version_suffix:
+        return f"{version_suffix.group(1)}_"
+
+    # If caller already provided a family-like value, keep it as-is.
+    return token
+
+
+def azure_sku_generation(sku: str) -> int | None:
+    match = re.search(r"(?i)_v(\d+)$", str(sku or "").strip())
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _pick_azure_sku_for_pricing(items: list[dict[str, Any]]) -> tuple[str | None, int | None, bool, str]:
+    sku_generations: dict[str, int | None] = {}
+    for item in items:
+        sku = str(item.get("armSkuName") or "").strip()
+        if not sku:
+            continue
+        sku_generations[sku] = azure_sku_generation(sku)
+
+    if not sku_generations:
+        return None, None, False, "not_found"
+
+    sku_price_anchor: dict[str, float] = {}
+    for item in items:
+        sku = str(item.get("armSkuName") or "").strip()
+        if not sku:
+            continue
+        price = safe_float(item.get("retailPrice"))
+        if price is None:
+            continue
+        if sku not in sku_price_anchor or price < sku_price_anchor[sku]:
+            sku_price_anchor[sku] = price
+
+    v4_plus_skus = [sku for sku, generation in sku_generations.items() if generation is not None and generation >= 4]
+    if v4_plus_skus:
+        priced = [sku for sku in v4_plus_skus if sku in sku_price_anchor]
+        if priced:
+            selected = min(priced, key=lambda sku: sku_price_anchor[sku])
+        else:
+            selected = sorted(v4_plus_skus)[0]
+        return selected, sku_generations.get(selected), False, "v4_plus_cheapest"
+
+    numeric_generations = [generation for generation in sku_generations.values() if generation is not None]
+    if numeric_generations:
+        latest_generation = max(numeric_generations)
+        latest_skus = [sku for sku, generation in sku_generations.items() if generation == latest_generation]
+        priced = [sku for sku in latest_skus if sku in sku_price_anchor]
+        if priced:
+            selected = min(priced, key=lambda sku: sku_price_anchor[sku])
+        else:
+            selected = sorted(latest_skus)[0]
+        return selected, latest_generation, True, "latest_below_v4"
+
+    selected = min(sku_generations.keys(), key=lambda sku: sku_price_anchor.get(sku, float("inf")))
+    return selected, None, True, "unversioned_family"
+
+
+def _filter_azure_items_by_sku(items: list[dict[str, Any]], sku: str | None) -> list[dict[str, Any]]:
+    if not sku:
+        return []
+    return [item for item in items if str(item.get("armSkuName") or "").strip() == sku]
+
+
 def fetch_azure_vm_prices(sku: str, region: str, os_name: str, timeout: int) -> dict[str, Any]:
-    filter_expr = f"serviceName eq 'Virtual Machines' and armRegionName eq '{region}' and armSkuName eq '{sku}'"
-    query = urllib.parse.urlencode({"$filter": filter_expr})
+    family_prefix = azure_family_prefix(sku)
+    filter_expr = (
+        f"serviceName eq 'Virtual Machines' and armRegionName eq '{region}' "
+        f"and startswith(armSkuName, '{family_prefix}')"
+    )
+    query = urllib.parse.urlencode({"currencyCode": "USD", "$filter": filter_expr})
     url = f"{AZURE_BASE_URL}?{query}"
 
     try:
@@ -101,23 +184,30 @@ def fetch_azure_vm_prices(sku: str, region: str, os_name: str, timeout: int) -> 
         base_consumption = [item for item in consumption if is_azure_base_vm_line(item) and azure_os_match(item, os_name)]
         base_reservation = [item for item in reservation if is_azure_base_vm_line(item) and azure_os_match(item, os_name)]
 
+        selected_sku, selected_generation, review_required, selection_mode = _pick_azure_sku_for_pricing(
+            base_consumption + base_reservation
+        )
+        selected_consumption = _filter_azure_items_by_sku(base_consumption, selected_sku)
+        selected_reservation = _filter_azure_items_by_sku(base_reservation, selected_sku)
+
         paygo = None
         paygo_meta: dict[str, Any] = {"status": "not_found"}
-        if base_consumption:
-            priced = [item for item in base_consumption if safe_float(item.get("retailPrice")) is not None]
-            target = min(priced, key=lambda item: float(item.get("retailPrice"))) if priced else base_consumption[0]
+        if selected_consumption:
+            priced = [item for item in selected_consumption if safe_float(item.get("retailPrice")) is not None]
+            target = min(priced, key=lambda item: float(item.get("retailPrice"))) if priced else selected_consumption[0]
             paygo = safe_float(target.get("retailPrice"))
             paygo_meta = {
                 "status": "ok" if paygo is not None else "not_found",
                 "meterName": target.get("meterName"),
                 "effectiveStartDate": target.get("effectiveStartDate"),
+                "armSkuName": target.get("armSkuName"),
             }
 
         def pick_ri_hourly(years: int) -> tuple[float | None, dict[str, Any]]:
             target_term = "1 year" if years == 1 else "3 years"
             candidates = [
                 item
-                for item in base_reservation
+                for item in selected_reservation
                 if str(item.get("reservationTerm") or "").strip().lower() == target_term
             ]
             if not candidates:
@@ -141,6 +231,7 @@ def fetch_azure_vm_prices(sku: str, region: str, os_name: str, timeout: int) -> 
                 "reservationTerm": target.get("reservationTerm"),
                 "effectiveStartDate": target.get("effectiveStartDate"),
                 "meterName": target.get("meterName"),
+                "armSkuName": target.get("armSkuName"),
             }
 
         ri_1y, ri_1y_meta = pick_ri_hourly(1)
@@ -153,7 +244,13 @@ def fetch_azure_vm_prices(sku: str, region: str, os_name: str, timeout: int) -> 
             "paygo_hourly_usd": paygo,
             "ri_1y_hourly_usd": ri_1y,
             "ri_3y_hourly_usd": ri_3y,
+            "review_flag": review_required,
             "meta": {
+                "requested_sku": sku,
+                "sku_family_prefix": family_prefix,
+                "selected_sku": selected_sku,
+                "selected_generation": selected_generation,
+                "selection_mode": selection_mode,
                 "paygo": paygo_meta,
                 "ri_1y": ri_1y_meta,
                 "ri_3y": ri_3y_meta,
@@ -167,6 +264,7 @@ def fetch_azure_vm_prices(sku: str, region: str, os_name: str, timeout: int) -> 
             "paygo_hourly_usd": None,
             "ri_1y_hourly_usd": None,
             "ri_3y_hourly_usd": None,
+            "review_flag": False,
         }
 
 
@@ -176,9 +274,46 @@ def aws_os_name(os_name: str) -> str:
 
 _AWS_REGION_INDEX_CACHE: dict[str, Any] | None = None
 _AWS_REGION_PAYLOAD_CACHE: dict[str, dict[str, Any]] = {}
+_AWS_LOCATION_NAME_CACHE: dict[str, str] | None = None
+
+
+def resolve_project_root() -> Path:
+    return Path(__file__).resolve().parents[4]
+
+
+def _load_aws_location_mapping_from_asset() -> dict[str, str]:
+    mapping_file = resolve_project_root() / ".github" / "skills" / "global-region-mapping" / "assets" / "get_regions.xlsx"
+    if not mapping_file.exists():
+        return {}
+
+    try:
+        df = pd.read_excel(mapping_file)
+    except Exception:  # noqa: BLE001
+        return {}
+
+    required = {"Cloud", "Region", "Region Long Name"}
+    if not required.issubset(set(df.columns)):
+        return {}
+
+    mapping: dict[str, str] = {}
+    for _, row in df.iterrows():
+        cloud = str(row.get("Cloud") or "").strip().lower()
+        region = str(row.get("Region") or "").strip().lower()
+        region_long_name = str(row.get("Region Long Name") or "").strip()
+        if cloud == "aws" and region and region_long_name:
+            mapping[region] = region_long_name
+    return mapping
 
 
 def _aws_region_location_name(region: str) -> str:
+    global _AWS_LOCATION_NAME_CACHE
+    if _AWS_LOCATION_NAME_CACHE is None:
+        _AWS_LOCATION_NAME_CACHE = _load_aws_location_mapping_from_asset()
+
+    region_key = str(region or "").strip().lower()
+    if region_key in _AWS_LOCATION_NAME_CACHE:
+        return _AWS_LOCATION_NAME_CACHE[region_key]
+
     mapping = {
         "us-east-1": "US East (N. Virginia)",
         "us-east-2": "US East (Ohio)",
@@ -194,7 +329,7 @@ def _aws_region_location_name(region: str) -> str:
         "eu-west-2": "EU (London)",
         "eu-central-1": "EU (Frankfurt)",
     }
-    return mapping.get(region, region)
+    return mapping.get(region_key, region)
 
 
 def _aws_load_region_index(timeout: int) -> dict[str, Any]:
@@ -695,6 +830,7 @@ def main() -> None:
             aws_instance_type = first_non_empty(row, ["aws_instance_type", "instance_type"])
             aws_region = first_non_empty(row, ["aws_region", "mapped_aws_region", "region_aws"])
             azure_sku = first_non_empty(row, ["azure_sku", "primary_sku"])
+            sap_sku = first_non_empty(row, ["sap_sku"])
             azure_region = first_non_empty(row, ["azure_region", "mapped_azure_region", "region_azure"])
             os_name = normalize_os(first_non_empty(row, ["os"], "linux"))
 
@@ -727,21 +863,32 @@ def main() -> None:
                     skip_azure=skip_azure,
                 )
 
+            sap_azure: dict[str, Any] = {"status": "skipped"}
+            if sap_sku and azure_region:
+                sap_azure = fetch_azure_vm_prices(str(sap_sku), str(azure_region), os_name, args.timeout)
+
             merged = dict(row)
             merged.update(
                 {
                     "pricing_status": result.get("status"),
                     "azure_status": result.get("azure", {}).get("status"),
-                    "azure_paygo_hourly_usd": result.get("azure", {}).get("paygo_hourly_usd"),
-                    "azure_ri_1y_hourly_usd": result.get("azure", {}).get("ri_1y_hourly_usd"),
-                    "azure_ri_3y_hourly_usd": result.get("azure", {}).get("ri_3y_hourly_usd"),
+                    "Azure_paygo": result.get("azure", {}).get("paygo_hourly_usd"),
+                    "Azure_1YRI": result.get("azure", {}).get("ri_1y_hourly_usd"),
+                    "Azure_3YRI": result.get("azure", {}).get("ri_3y_hourly_usd"),
+                    "Azure_review_flag": result.get("azure", {}).get("review_flag"),
+                    "sap_azure_status": sap_azure.get("status"),
+                    "Azure_SAP_paygo": sap_azure.get("paygo_hourly_usd"),
+                    "Azure_SAP_1YRI": sap_azure.get("ri_1y_hourly_usd"),
+                    "Azure_SAP_3YRI": sap_azure.get("ri_3y_hourly_usd"),
+                    "Azure_SAP_review_flag": sap_azure.get("review_flag"),
                     "aws_status": result.get("aws", {}).get("status"),
-                    "aws_paygo_hourly_usd": result.get("aws", {}).get("paygo_hourly_usd"),
-                    "aws_ri_1y_hourly_usd": result.get("aws", {}).get("ri_1y_hourly_usd"),
-                    "aws_ri_3y_hourly_usd": result.get("aws", {}).get("ri_3y_hourly_usd"),
+                    "AWS_paygo": result.get("aws", {}).get("paygo_hourly_usd"),
+                    "AWS_1YRI": result.get("aws", {}).get("ri_1y_hourly_usd"),
+                    "AWS_3YRI": result.get("aws", {}).get("ri_3y_hourly_usd"),
                     "pricing_error": result.get("error")
                     or result.get("aws", {}).get("error")
-                    or result.get("azure", {}).get("error"),
+                    or result.get("azure", {}).get("error")
+                    or sap_azure.get("error"),
                     "pricing_result_json": json.dumps(result, ensure_ascii=False),
                 }
             )

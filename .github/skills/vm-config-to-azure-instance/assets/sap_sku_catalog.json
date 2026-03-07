@@ -1,0 +1,126 @@
+{
+  "version": "2026-03-05",
+  "source": "manually curated baseline; align with SAP Note 1928533 + PAM in governance workflow",
+  "skus": [
+    {
+      "sku": "Standard_E16ds_v5",
+      "vcpu": 16,
+      "memory_gb": 128,
+      "sap_certified": true,
+      "supported_regions": ["southeastasia", "eastasia", "eastus", "westeurope"],
+      "supported_os": ["linux", "windows"]
+    },
+    {
+      "sku": "Standard_E20ds_v5",
+      "vcpu": 20,
+      "memory_gb": 160,
+      "sap_certified": true,
+      "supported_regions": ["southeastasia", "eastasia", "eastus", "westeurope"],
+      "supported_os": ["linux", "windows"]
+    },
+    {
+      "sku": "Standard_E32ds_v5",
+      "vcpu": 32,
+      "memory_gb": 256,
+      "sap_certified": true,
+      "supported_regions": ["southeastasia", "eastasia", "eastus", "westeurope"],
+      "supported_os": ["linux", "windows"]
+    },
+    {
+      "sku": "Standard_E48ds_v5",
+      "vcpu": 48,
+      "memory_gb": 384,
+      "sap_certified": true,
+      "supported_regions": ["southeastasia", "eastasia", "eastus", "westeurope"],
+      "supported_os": ["linux", "windows"]
+    },
+    {
+      "sku": "Standard_E64ds_v5",
+      "vcpu": 64,
+      "memory_gb": 504,
+      "sap_certified": true,
+      "supported_regions": ["southeastasia", "eastasia", "eastus", "westeurope"],
+      "supported_os": ["linux", "windows"]
+    },
+    {
+      "sku": "Standard_M32ts",
+      "vcpu": 32,
+      "memory_gb": 192,
+      "sap_certified": true,
+      "supported_regions": ["southeastasia", "eastus", "westeurope"],
+      "supported_os": ["linux"]
+    },
+    {
+      "sku": "Standard_M64ls",
+      "vcpu": 64,
+      "memory_gb": 512,
+      "sap_certified": true,
+      "supported_regions": ["southeastasia", "eastus", "westeurope"],
+      "supported_os": ["linux"]
+    },
+    {
+      "sku": "Standard_M64s",
+      "vcpu": 64,
+      "memory_gb": 1024,
+      "sap_certified": true,
+      "supported_regions": ["southeastasia", "eastus", "westeurope"],
+      "supported_os": ["linux", "windows"]
+    },
+    {
+      "sku": "Standard_M128s",
+      "vcpu": 128,
+      "memory_gb": 2048,
+      "sap_certified": true,
+      "supported_regions": ["eastus", "westeurope"],
+      "supported_os": ["linux"]
+    },
+    {
+      "sku": "Standard_M208ms_v2",
+      "vcpu": 208,
+      "memory_gb": 5888,
+      "sap_certified": true,
+      "supported_regions": ["eastus", "westeurope"],
+      "supported_os": ["linux"]
+    },
+    {
+      "sku": "Standard_M416ms_v2",
+      "vcpu": 416,
+      "memory_gb": 11776,
+      "sap_certified": true,
+      "supported_regions": ["eastus", "westeurope"],
+      "supported_os": ["linux"]
+    },
+    {
+      "sku": "Standard_E4as_v5",
+      "vcpu": 4,
+      "memory_gb": 32,
+      "sap_certified": false,
+      "supported_regions": ["southeastasia", "eastasia", "eastus", "westeurope"],
+      "supported_os": ["linux", "windows"]
+    },
+    {
+      "sku": "Standard_E8as_v5",
+      "vcpu": 8,
+      "memory_gb": 64,
+      "sap_certified": false,
+      "supported_regions": ["southeastasia", "eastasia", "eastus", "westeurope"],
+      "supported_os": ["linux", "windows"]
+    },
+    {
+      "sku": "Standard_E32as_v5",
+      "vcpu": 32,
+      "memory_gb": 256,
+      "sap_certified": false,
+      "supported_regions": ["southeastasia", "eastasia", "eastus", "westeurope"],
+      "supported_os": ["linux", "windows"]
+    },
+    {
+      "sku": "Standard_E48as_v5",
+      "vcpu": 48,
+      "memory_gb": 384,
+      "sap_certified": false,
+      "supported_regions": ["southeastasia", "eastasia", "eastus", "westeurope"],
+      "supported_os": ["linux", "windows"]
+    }
+  ]
+}

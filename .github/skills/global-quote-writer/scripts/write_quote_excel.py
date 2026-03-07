@@ -11,28 +11,78 @@ from openpyxl.styles import Alignment, Font
 SHEETS = ["Summary", "LineItems", "Assumptions", "Evidence"]
 
 LINE_ITEMS_COLUMN_MAP = {
+    "resource_type": ["resource_type", "service"],
+    "system": ["system"],
+    "env": ["env", "environment"],
+    "SAP_workload": ["SAP_workload", "sap_workload"],
+    "workload_type": ["workload_type"],
+    "vcpu": ["vcpu", "parsed_vcpu"],
+    "memory_gb": ["memory_gb", "parsed_memory_gb"],
+    "disk": ["disk"],
+    "quantity": ["quantity"],
+    "os": ["os"],
+    "region": ["region", "region_input"],
     "item_id": ["item_id", "line_id"],
     "provider": ["provider"],
-    "resource_type": ["resource_type", "service"],
-    "quantity": ["quantity"],
     "sku/os": ["sku/os", "sku_os", "os", "sku"],
-    "region": ["region"],
     "region_azure": ["region_azure"],
     "primary_sku": ["primary_sku", "sku"],
-    "fallback_skus": ["fallback_skus"],
+    "fallback_sku": ["fallback_sku", "fallback_skus"],
     "sap_sku": ["sap_sku"],
     "billing_unit": ["billing_unit", "unit"],
-    "unit_price_AWS_paygo": ["unit_price_AWS_paygo", "unit_price_aws_paygo"],
-    "unit_price_Azure_paygo": ["unit_price_Azure_paygo", "unit_price_azure_paygo", "unit_price_hourly"],
-    "line_total_AWS_paygo": ["line_total_AWS_paygo", "monthly_cost_AWS_paygo", "monthly_cost"],
-    "line_total_Azure_paygo": ["line_total_Azure_paygo", "monthly_cost_Azure_paygo"],
-    "line_total_AWS_1YRI": ["line_total_AWS_1YRI", "monthly_cost_AWS_1YRI"],
-    "line_total_AWS_3YRI": ["line_total_AWS_3YRI", "monthly_cost_AWS_3YRI"],
-    "line_total_Azure_1YRI": ["line_total_Azure_1YRI", "monthly_cost_Azure_1YRI"],
-    "line_total_Azure_3YRI": ["line_total_Azure_3YRI", "monthly_cost_Azure_3YRI"],
+    "AWS_paygo": ["AWS_paygo", "unit_price_AWS_paygo", "aws_paygo_hourly_usd"],
+    "AWS_1YRI": ["AWS_1YRI", "aws_ri_1y_hourly_usd"],
+    "AWS_3YRI": ["AWS_3YRI", "aws_ri_3y_hourly_usd"],
+    "Azure_paygo": ["Azure_paygo", "unit_price_Azure_paygo", "azure_paygo_hourly_usd", "unit_price_hourly"],
+    "Azure_1YRI": ["Azure_1YRI", "azure_ri_1y_hourly_usd"],
+    "Azure_3YRI": ["Azure_3YRI", "azure_ri_3y_hourly_usd"],
+    "Azure_SAP_paygo": ["Azure_SAP_paygo", "unit_price_Azure_SAP_paygo", "sap_azure_paygo_hourly_usd"],
+    "Azure_SAP_1YRI": ["Azure_SAP_1YRI", "sap_azure_ri_1y_hourly_usd"],
+    "Azure_SAP_3YRI": ["Azure_SAP_3YRI", "sap_azure_ri_3y_hourly_usd"],
     "review_flag": ["review_flag"],
     "review_reason": ["review_reason", "notes"],
     "evidence_id": ["evidence_id"],
+}
+
+LINE_ITEMS_BASE_HEADERS = [
+    "resource_type",
+    "system",
+    "env",
+    "SAP_workload",
+    "workload_type",
+    "vcpu",
+    "memory_gb",
+    "disk",
+    "quantity",
+    "os",
+    "region",
+    "item_id",
+    "provider",
+    "sku/os",
+    "region_azure",
+    "primary_sku",
+    "fallback_sku",
+    "sap_sku",
+    "billing_unit",
+    "AWS_paygo",
+    "AWS_1YRI",
+    "AWS_3YRI",
+    "Azure_paygo",
+    "Azure_1YRI",
+    "Azure_3YRI",
+    "Azure_SAP_paygo",
+    "Azure_SAP_1YRI",
+    "Azure_SAP_3YRI",
+    "review_flag",
+    "review_reason",
+    "evidence_id",
+]
+
+LINE_ITEMS_AWS_COLUMNS_WHEN_NO_PROVIDER = {
+    "provider",
+    "AWS_paygo",
+    "AWS_1YRI",
+    "AWS_3YRI",
 }
 
 
@@ -82,6 +132,17 @@ def _print(obj: Dict[str, Any]) -> None:
     print(json.dumps(obj, ensure_ascii=False, indent=2))
 
 
+def _as_bool(value: Any, default: bool = True) -> bool:
+    if value is None:
+        return default
+    token = str(value).strip().lower()
+    if token in {"1", "true", "yes", "y", "on"}:
+        return True
+    if token in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
 def init_template(template_path: Path) -> None:
     template_path.parent.mkdir(parents=True, exist_ok=True)
     from openpyxl import Workbook
@@ -129,17 +190,18 @@ def init_template(template_path: Path) -> None:
         "region",
         "region_azure",
         "primary_sku",
-        "fallback_skus",
+        "fallback_sku",
         "sap_sku",
         "billing_unit",
-        "unit_price_AWS_paygo",
-        "unit_price_Azure_paygo",
-        "line_total_AWS_paygo",
-        "line_total_Azure_paygo",
-        "line_total_AWS_1YRI",
-        "line_total_AWS_3YRI",
-        "line_total_Azure_1YRI",
-        "line_total_Azure_3YRI",
+        "AWS_paygo",
+        "AWS_1YRI",
+        "AWS_3YRI",
+        "Azure_paygo",
+        "Azure_1YRI",
+        "Azure_3YRI",
+        "Azure_SAP_paygo",
+        "Azure_SAP_1YRI",
+        "Azure_SAP_3YRI",
         "review_flag",
         "review_reason",
         "evidence_id",
@@ -232,10 +294,78 @@ def _canonicalize_line_sheet_headers(ws) -> None:
         "monthly_cost_Azure_1YRI": "line_total_Azure_1YRI",
         "monthly_cost_Azure_3YRI": "line_total_Azure_3YRI",
     }
+    required_headers = [
+        "item_id",
+        "provider",
+        "resource_type",
+        "quantity",
+        "sku/os",
+        "region",
+        "region_azure",
+        "primary_sku",
+        "fallback_sku",
+        "sap_sku",
+        "billing_unit",
+        "AWS_paygo",
+        "AWS_1YRI",
+        "AWS_3YRI",
+        "Azure_paygo",
+        "Azure_1YRI",
+        "Azure_3YRI",
+        "Azure_SAP_paygo",
+        "Azure_SAP_1YRI",
+        "Azure_SAP_3YRI",
+        "review_flag",
+        "review_reason",
+        "evidence_id",
+    ]
     for col in range(1, ws.max_column + 1):
         value = ws.cell(1, col).value
         if value in header_renames:
             ws.cell(1, col).value = header_renames[value]
+
+    deprecated_headers = {
+        "unit_price_AWS_paygo",
+        "unit_price_Azure_paygo",
+        "unit_price_Azure_SAP_paygo",
+        "line_total_AWS_paygo",
+        "line_total_Azure_paygo",
+        "line_total_AWS_1YRI",
+        "line_total_AWS_3YRI",
+        "line_total_Azure_1YRI",
+        "line_total_Azure_3YRI",
+        "line_total_Azure_SAP_paygo",
+        "line_total_Azure_SAP_1YRI",
+        "line_total_Azure_SAP_3YRI",
+        "fallback_skus",
+    }
+    _drop_line_sheet_headers(ws, deprecated_headers)
+
+    existing = set(_sheet_headers(ws))
+    next_col = ws.max_column + 1
+    for header in required_headers:
+        if header in existing:
+            continue
+        ws.cell(1, next_col).value = header
+        next_col += 1
+
+
+def _drop_line_sheet_headers(ws, headers_to_drop: set[str]) -> None:
+    for col in range(ws.max_column, 0, -1):
+        value = ws.cell(1, col).value
+        if value in headers_to_drop:
+            ws.delete_cols(col, 1)
+
+
+def _set_line_sheet_headers(ws, headers: list[str]) -> None:
+    current_max = ws.max_column
+    if current_max > len(headers):
+        ws.delete_cols(len(headers) + 1, current_max - len(headers))
+    elif current_max < len(headers):
+        ws.insert_cols(current_max + 1, len(headers) - current_max)
+
+    for idx, header in enumerate(headers, start=1):
+        ws.cell(1, idx).value = header
 
 
 def _normalize_assumptions(assumptions: Any) -> list[Dict[str, Any]]:
@@ -328,12 +458,12 @@ def _build_summary_cells(summary: Dict[str, Any], normalized_line_items: list[Di
     a_3y = _to_float(get_value("azure_3y_ri", "a_3y", "azure_mapped_3yri"))
 
     if any(value is None for value in [c_paygo, c_1y, c_3y, a_paygo, a_1y, a_3y]):
-        c_paygo_values = [_to_float(item.get("line_total_AWS_paygo")) for item in normalized_line_items]
-        c_1y_values = [_to_float(item.get("line_total_AWS_1YRI")) for item in normalized_line_items]
-        c_3y_values = [_to_float(item.get("line_total_AWS_3YRI")) for item in normalized_line_items]
-        a_paygo_values = [_to_float(item.get("line_total_Azure_paygo")) for item in normalized_line_items]
-        a_1y_values = [_to_float(item.get("line_total_Azure_1YRI")) for item in normalized_line_items]
-        a_3y_values = [_to_float(item.get("line_total_Azure_3YRI")) for item in normalized_line_items]
+        c_paygo_values = [_to_float(item.get("AWS_paygo")) for item in normalized_line_items]
+        c_1y_values = [_to_float(item.get("AWS_1YRI")) for item in normalized_line_items]
+        c_3y_values = [_to_float(item.get("AWS_3YRI")) for item in normalized_line_items]
+        a_paygo_values = [_to_float(item.get("Azure_paygo")) for item in normalized_line_items]
+        a_1y_values = [_to_float(item.get("Azure_1YRI")) for item in normalized_line_items]
+        a_3y_values = [_to_float(item.get("Azure_3YRI")) for item in normalized_line_items]
 
         c_paygo = c_paygo if c_paygo is not None else _sum_or_none(c_paygo_values)
         c_1y = c_1y if c_1y is not None else _sum_or_none(c_1y_values)
@@ -397,7 +527,11 @@ def write_quote_excel(payload: Dict[str, Any], output_xlsx: Path, template: Path
     assumptions_sheet = workbook["Assumptions"]
     evidence_sheet = workbook["Evidence"]
 
-    _canonicalize_line_sheet_headers(line_sheet)
+    include_provider_columns = _as_bool(payload.get("summary", {}).get("input_provider_present"), default=True)
+    line_headers_order = list(LINE_ITEMS_BASE_HEADERS)
+    if not include_provider_columns:
+        line_headers_order = [header for header in line_headers_order if header not in LINE_ITEMS_AWS_COLUMNS_WHEN_NO_PROVIDER]
+    _set_line_sheet_headers(line_sheet, line_headers_order)
 
     line_items = _normalize_line_items(payload.get("line_items", []))
     assumptions = _normalize_assumptions(payload.get("assumptions"))
@@ -440,7 +574,7 @@ def main() -> None:
     parser.add_argument("--output-xlsx", help="Output Excel path.")
     parser.add_argument(
         "--template",
-        default=".github/skills/excel-quote-writer/assets/summary-layout-template.xlsx",
+        default=".github/skills/global-quote-writer/assets/summary-layout-template.xlsx",
         help="Template workbook path.",
     )
     parser.add_argument("--init-template", action="store_true", help="Initialize template workbook and exit.")

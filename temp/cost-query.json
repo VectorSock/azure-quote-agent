@@ -1,0 +1,27 @@
+{
+  "type": "ActualCost",
+  "timePeriod": {
+    "from": "2026-02-04T06:47:38Z",
+    "to": "2026-03-06T06:47:38Z"
+  },
+  "dataset": {
+    "grouping": [
+      {
+        "type": "Dimension",
+        "name": "ResourceId"
+      },
+      {
+        "type": "Dimension",
+        "name": "ServiceName"
+      }
+    ],
+    "aggregation": {
+      "totalCost": {
+        "name": "Cost",
+        "function": "Sum"
+      }
+    },
+    "granularity": "None"
+  },
+  "timeframe": "Custom"
+}

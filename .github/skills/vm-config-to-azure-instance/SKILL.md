@@ -1,102 +1,52 @@
 ---
 name: vm-config-to-azure-instance
-description: 将结构化 VM 配置（vCPU、内存、架构与能力特征）映射为 Azure VM 实例候选（primary + fallback），用于迁移评估与报价前置。
+description: 将结构化 VM 配置（vCPU、内存、架构与业务上下文）映射为 Azure VM 候选，并在需要时给出 SAP/HANA 认证机型。
 ---
 
 # 技能：VM 配置到 Azure 实例映射
 
 ## 概述
-当用户已经有结构化 VM 规格（例如 `vcpu=16`、`memory_gb=64`）并希望快速得到 Azure 实例候选时，使用此技能。
+输入结构化规格（vcpu、memory_gb）与业务上下文，输出 Azure 候选：
+- primary_sku（同时输出 canonical 列 azure_sku）
+- fallback_sku / fallback_skus
+- sap_sku（仅规则要求时）
+- support gate 与 ranking 明细
 
-技能输出包括：
-- `primary_sku`：首选 Azure VM SKU
-- `fallback_skus`：回退候选（按优先级）
-- `mapping_confidence`：映射置信度（启发式）
-- `assumptions`：本次映射采用的默认假设
+脚本主入口（canonical）：
+python .github/skills/vm-config-to-azure-instance/scripts/vm_config_to_azure_instance.py
 
-## 何时使用
-- 在跨云迁移评估中，需要把源端 VM 规格映射到 Azure 实例。
-- 在报价前，需要先将用户输入配置标准化到 Azure SKU。
-- 当用户未提供明确 Azure 型号，但给了 CPU/内存/能力特征。
+## Quick Start
+单条映射：
 
-## 运行方式
-所有路径默认基于当前工作目录。
+python .github/skills/vm-config-to-azure-instance/scripts/vm_config_to_azure_instance.py --vcpu 16 --memory-gb 64 --cpu-vendor amd
 
-### 单条映射
-`python .github/skills/vm-config-to-azure-instance/scripts/vm-config-to-azure-instance.py --vcpu 16 --memory-gb 64 --cpu-vendor amd`
+SAP 场景：
 
-### 单条映射（包含能力特征）
-`python .github/skills/vm-config-to-azure-instance/scripts/vm-config-to-azure-instance.py --vcpu 8 --memory-gb 16 --burstable --network-optimized`
+python .github/skills/vm-config-to-azure-instance/scripts/vm_config_to_azure_instance.py --vcpu 32 --memory-gb 256 --system S4 --env PRD --workload-type DB --sap-workload true
 
-### 批量映射（CSV）
-`python .github/skills/vm-config-to-azure-instance/scripts/vm-config-to-azure-instance.py --input-file "input/vm_specs.csv" --output "output/azure_vm_candidates.csv"`
+批量映射：
 
-## 参数说明
-- `--vcpu`：vCPU 数（必填，单条模式）。
-- `--memory-gb`：内存（GB，必填，单条模式）。
-- `--cpu-vendor`：`amd` / `intel` / `arm` / `unknown`（默认 `unknown`）。
-- `--cpu-arch`：`x86_64` / `arm64`（默认 `x86_64`）。
-- `--burstable`：是否突发型。
-- `--gpu`：是否 GPU 型。
-- `--local-temp-disk`：是否需要本地临时盘。
-- `--network-optimized`：是否网络增强。
-- `--prefer-amd` / `--no-prefer-amd`：是否倾向使用 AMD（默认启用）。
-- `--fallback-count`：回退候选数量（默认 `3`）。
-- `--input-file`：批量输入 CSV。
-- `--output`：批量输出 CSV（默认 `output/azure_instance_mapping.csv`）。
+python .github/skills/vm-config-to-azure-instance/scripts/vm_config_to_azure_instance.py --input-file input/vm_specs.csv --output output/azure_vm_candidates.csv
 
-## 批量输入 CSV 列名要求
-- 最低要求：每行至少提供一组可解析规格列：
-  - `vcpu` 或 `parsed_vcpu`
-  - `memory_gb` 或 `parsed_memory_gb`
-- 可选能力列（脚本会自动识别）：
-  - `cpu_vendor`（或 `parsed_cpu_vendor`）
-  - `cpu_arch`（或 `parsed_cpu_arch`）
-  - `burstable`（或 `is_burstable`）
-  - `gpu`（或 `is_gpu_accelerated`）
-  - `local_temp_disk`（或 `has_local_temp_disk`）
-  - `network_optimized`（或 `is_network_optimized`）
-  - `prefer_amd`、`fallback_count`
-- 若上游来自 `vm-aws-instance-to-config`，可直接使用其输出 CSV 作为输入，无需额外改列。
+## Advanced Options
+- --app-db-policy: strict | balanced | cost-first
+- --catalog-file: 外置 SAP SKU 目录
+- --azure-region / --os-name / --pam-supported: support gate 信号
+- --required-iops / --required-network-mbps / --required-disk-throughput-mbps: ranking 性能信号
+- --prefer-amd / --fallback-count: 候选扩展策略
 
-## 执行规则
-1. 必须以脚本实际输出为准，不要自行构造 SKU。
-2. 若输出 `status=invalid_input`，应提示用户补齐或修正配置。
-3. 若 `mapping_confidence` 偏低，应提示用户人工复核。
+批量最低输入：
+- vcpu 或 parsed_vcpu
+- memory_gb 或 parsed_memory_gb
 
-## 输出示例
-```json
-{
-  "status": "ok",
-  "input": {
-    "vcpu": 16,
-    "memory_gb": 64.0,
-    "cpu_vendor": "amd",
-    "cpu_arch": "x86_64",
-    "burstable": false,
-    "gpu": false,
-    "local_temp_disk": false,
-    "network_optimized": false
-  },
-  "primary_sku": "Standard_E16as_v5",
-  "fallback_skus": [
-    "Standard_D16as_v5",
-    "Standard_E16s_v5",
-    "Standard_F16s_v2"
-  ],
-  "mapping_confidence": 0.84,
-  "matched_by": "shape_and_feature_policy",
-  "assumptions": [
-    "version_policy_applied",
-    "premium_storage_suffix_default_except_b_family",
-    "fallback_suffix_priority_applied",
-    "fallback_size_escalation_applied"
-  ]
-}
-```
+推荐输入：
+- system, env, workload_type, SAP_workload
+- mapped_azure_region 或 azure_region（canonical 推荐 mapped_azure_region）
 
-## 参考材料
-- `references/guide-family-selection.md`
-- `references/guide-sku-suffix.md`
-- `references/guide-fallback-strategy.md`
-- `references/guide-tco-levers.md`
+## 决策流程
+1. support gate：PAM / SAP Note / 区域 / OS 约束校验
+2. ranking：按 policy 对 fit + perf + cost 综合排序
+
+## 列名规范
+统一列名请参考：
+.github/skills/references/column-schema.md

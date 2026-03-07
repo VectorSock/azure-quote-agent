@@ -24,6 +24,11 @@ COLUMN_ALIASES: dict[str, list[str]] = {
     "workload": ["workload", "scenario", "usage", "业务"],
     "status": ["status", "record_status"],
     "status_reason": ["status_reason", "reason", "message"],
+    "system": ["system", "sap_system", "系统", "系统名称"],
+    "env": ["env", "environment", "环境"],
+    "SAP_workload": ["sap_workload", "sap workload", "sap_workload_flag", "是否sap", "sap负载"],
+    "workload_type": ["workload_type", "role", "角色", "工作负载类型"],
+    "disk": ["disk", "disk_gb", "storage", "磁盘", "磁盘容量"],
 }
 
 
@@ -105,6 +110,20 @@ def normalize_os_name(value: Any) -> str | None:
         return "linux"
 
     return raw
+
+
+def normalize_sap_workload(value: Any) -> bool | None:
+    if value is None:
+        return None
+
+    raw = str(value).strip().lower()
+    if raw in {"", "nan", "none", "null"}:
+        return None
+    if raw in {"1", "1.0", "true", "yes", "y", "是"}:
+        return True
+    if raw in {"0", "0.0", "false", "no", "n", "否"}:
+        return False
+    return None
 
 
 def detect_column(columns: list[str], aliases: list[str]) -> str | None:
@@ -229,7 +248,11 @@ def build_records_by_fallback(input_excel: Path) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for index, row in df.iterrows():
         instance_name = str(row.get(detected["instance_name"], "") if detected["instance_name"] else "").strip()
-        provider = normalize_text(row.get(detected["provider"], "") if detected["provider"] else "")
+        vcpu_value = to_float_or_none(row.get(detected["vcpu"])) if detected["vcpu"] else None
+        memory_value = to_float_or_none(row.get(detected["memory_gb"])) if detected["memory_gb"] else None
+        raw_provider = str(row.get(detected["provider"], "") if detected["provider"] else "").strip()
+        provider = normalize_text(raw_provider)
+        provider_from_input = bool(raw_provider)
         provider = infer_provider(provider, instance_name)
 
         resource_type = normalize_text(row.get(detected["resource_type"], "") if detected["resource_type"] else "")
@@ -237,8 +260,9 @@ def build_records_by_fallback(input_excel: Path) -> list[dict[str, Any]]:
 
         status = normalize_text(row.get(detected["status"], "") if detected["status"] else "")
         status_reason = str(row.get(detected["status_reason"], "") if detected["status_reason"] else "").strip()
+        has_vm_shape = (vcpu_value or 0) > 0 and (memory_value or 0) > 0
         if not status:
-            status = "ok" if instance_name else "review"
+            status = "ok" if (instance_name or has_vm_shape) else "review"
             if not status_reason and status == "review":
                 status_reason = "missing_instance_name"
 
@@ -246,65 +270,55 @@ def build_records_by_fallback(input_excel: Path) -> list[dict[str, Any]]:
             {
                 "nrm_id": f"row-{index + 1}",
                 "provider": provider,
+                "provider_from_input": provider_from_input,
                 "resource_type": resource_type,
                 "instance_name": instance_name,
                 "quantity": to_float_or_none(row.get(detected["quantity"])) if detected["quantity"] else None,
-                "vcpu": to_float_or_none(row.get(detected["vcpu"])) if detected["vcpu"] else None,
-                "memory_gb": to_float_or_none(row.get(detected["memory_gb"])) if detected["memory_gb"] else None,
+                "vcpu": vcpu_value,
+                "memory_gb": memory_value,
                 "os": normalize_os_name(row.get(detected["os"], "") if detected["os"] else ""),
                 "region_input": str(row.get(detected["region_input"], "") if detected["region_input"] else "").strip() or None,
                 "region_aws": None,
                 "region_azure": None,
                 "workload": str(row.get(detected["workload"], "") if detected["workload"] else "").strip() or None,
+                "system": str(row.get(detected["system"], "") if detected["system"] else "").strip() or None,
+                "env": str(row.get(detected["env"], "") if detected["env"] else "").strip() or None,
+                "SAP_workload": normalize_sap_workload(row.get(detected["SAP_workload"])) if detected["SAP_workload"] else None,
+                "workload_type": str(row.get(detected["workload_type"], "") if detected["workload_type"] else "").strip() or None,
+                "disk": str(row.get(detected["disk"], "") if detected["disk"] else "").strip() or None,
                 "status": status,
-                "status_reason": status_reason or None,
+                "status_reason": None if (status_reason == "missing_instance_name" and has_vm_shape) else (status_reason or None),
             }
         )
     return records
 
 
-def build_records(input_excel: Path) -> tuple[list[dict[str, Any]], str]:
-    return build_records_by_fallback(input_excel), "standalone_engine"
-
-
-def as_base_row(record: Any) -> dict[str, Any]:
-    if isinstance(record, dict):
-        return {
-            "nrm_id": record.get("nrm_id"),
-            "provider": record.get("provider"),
-            "resource_type": record.get("resource_type"),
-            "instance_name": record.get("instance_name"),
-            "quantity": record.get("quantity"),
-            "vcpu": record.get("vcpu"),
-            "memory_gb": record.get("memory_gb"),
-            "os": record.get("os"),
-            "region_input": record.get("region_input"),
-            "region_aws": record.get("region_aws"),
-            "region_azure": record.get("region_azure"),
-            "workload": record.get("workload"),
-            "status": record.get("status"),
-            "status_reason": record.get("status_reason"),
-        }
-
+def as_base_row(record: dict[str, Any]) -> dict[str, Any]:
     return {
-        "nrm_id": getattr(record, "nrm_id", None),
-        "provider": getattr(record, "provider", None),
-        "resource_type": getattr(record, "resource_type", None),
-        "instance_name": getattr(record, "instance_name", None),
-        "quantity": getattr(record, "quantity", None),
-        "vcpu": getattr(record, "vcpu", None),
-        "memory_gb": getattr(record, "memory_gb", None),
-        "os": getattr(record, "os", None),
-        "region_input": getattr(record, "region_input", None),
-        "region_aws": getattr(record, "region_aws", None),
-        "region_azure": getattr(record, "region_azure", None),
-        "workload": getattr(record, "workload", None),
-        "status": getattr(record, "status", None),
-        "status_reason": getattr(record, "status_reason", None),
+        "nrm_id": record.get("nrm_id"),
+        "provider": record.get("provider"),
+        "provider_from_input": record.get("provider_from_input"),
+        "resource_type": record.get("resource_type"),
+        "instance_name": record.get("instance_name"),
+        "quantity": record.get("quantity"),
+        "vcpu": record.get("vcpu"),
+        "memory_gb": record.get("memory_gb"),
+        "os": record.get("os"),
+        "region_input": record.get("region_input"),
+        "region_aws": record.get("region_aws"),
+        "region_azure": record.get("region_azure"),
+        "workload": record.get("workload"),
+        "system": record.get("system"),
+        "env": record.get("env"),
+        "SAP_workload": record.get("SAP_workload"),
+        "workload_type": record.get("workload_type"),
+        "disk": record.get("disk"),
+        "status": record.get("status"),
+        "status_reason": record.get("status_reason"),
     }
 
 
-def extract_aws_vm(record: Any) -> dict[str, Any] | None:
+def extract_aws_vm(record: dict[str, Any]) -> dict[str, Any] | None:
     base = as_base_row(record)
     provider = normalize_text(base.get("provider"))
     resource_type = normalize_text(base.get("resource_type"))
@@ -312,17 +326,18 @@ def extract_aws_vm(record: Any) -> dict[str, Any] | None:
 
     if resource_type != "vm":
         return None
-    if provider != "aws":
+    if provider not in {"", "aws"}:
         return None
-    if not instance_name:
+    has_shape = (to_float_or_none(base.get("vcpu")) or 0) > 0 and (to_float_or_none(base.get("memory_gb")) or 0) > 0
+    if not instance_name and not has_shape:
         return None
 
     row = base
-    row["instance_type"] = normalize_instance_type(instance_name)
+    row["instance_type"] = normalize_instance_type(instance_name) if instance_name else ""
     return row
 
 
-def extract_all_resources(record: Any) -> dict[str, Any] | None:
+def extract_all_resources(record: dict[str, Any]) -> dict[str, Any] | None:
     return as_base_row(record)
 
 
@@ -340,6 +355,11 @@ EXTRACTOR_REGISTRY: dict[str, dict[str, Any]] = {
             "os",
             "region_input",
             "workload",
+            "system",
+            "env",
+            "SAP_workload",
+            "workload_type",
+            "disk",
         ],
     },
     "all_resources": {
@@ -387,7 +407,8 @@ def main() -> None:
     provider_filter = normalize_text(args.provider)
     resource_type_filter = normalize_text(args.resource_type)
 
-    records, extraction_engine = build_records(input_excel)
+    records = build_records_by_fallback(input_excel)
+    extraction_engine = "standalone_engine"
 
     output_rows: list[dict[str, Any]] = []
     eligible_rows = 0

@@ -1,0 +1,55 @@
+name: Refresh AWS EC2 Bulk Offers
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_regions:
+        description: "Optional limit for test runs (0 = all regions)"
+        required: false
+        default: "0"
+  schedule:
+    - cron: "17 2 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: refresh-aws-ec2-bulk-offers
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Refresh AWS EC2 offer files
+        run: |
+          python scripts/maintenance/refresh_aws_ec2_bulk_offers.py \
+            --regions-excel .github/skills/global-region-mapping/assets/get_regions.xlsx \
+            --output-root .github/skills/vm-pricing-retail-api/assets/aws_ec2_bulk_offers \
+            --max-regions "${{ inputs.max_regions || '0' }}"
+
+      - name: Upload refreshed offers artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-ec2-bulk-offers-${{ github.run_id }}
+          path: |
+            .github/skills/vm-pricing-retail-api/assets/aws_ec2_bulk_offers/latest.json
+            .github/skills/vm-pricing-retail-api/assets/aws_ec2_bulk_offers/manifests/
+            .github/skills/vm-pricing-retail-api/assets/aws_ec2_bulk_offers/current/
+          if-no-files-found: error

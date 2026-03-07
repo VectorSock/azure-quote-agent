@@ -4,8 +4,10 @@ import argparse
 import gzip
 import hashlib
 import json
+import logging
 import shutil
 import socket
+import sys
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -18,9 +20,24 @@ import pandas as pd
 
 
 DEFAULT_AWS_BASE_URL = "https://pricing.us-east-1.amazonaws.com"
-SCRIPT_VERSION = "1.1.0"
-DEFAULT_USER_AGENT = "aws-ec2-bulk-refresh/1.1"
+SCRIPT_VERSION = "2.0.0"
+DEFAULT_USER_AGENT = "aws-ec2-bulk-refresh/2.0"
 URL_OPENER = urllib.request.build_opener()
+
+EXIT_SUCCESS = 0
+EXIT_FATAL = 1
+EXIT_PARTIAL = 2
+
+LOGGER = logging.getLogger("refresh_aws_ec2_bulk_offers")
+
+
+def _setup_logging(level_name: str) -> None:
+    level = getattr(logging, level_name.upper(), logging.INFO)
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%SZ",
+    )
 
 
 def _now_compact_utc() -> str:
@@ -56,6 +73,14 @@ def _get_bytes_with_retry(
             if attempt == retries:
                 break
             backoff = retry_backoff_seconds * (2 ** (attempt - 1))
+            LOGGER.warning(
+                "Request failed (%s/%s), retry in %.2fs, url=%s, error=%s",
+                attempt,
+                retries,
+                backoff,
+                url,
+                exc,
+            )
             time.sleep(backoff)
 
     assert last_exc is not None
@@ -149,6 +174,38 @@ def _ensure_path(path: Path) -> Path:
     return path if path.is_absolute() else Path.cwd() / path
 
 
+def _load_json_if_exists(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.warning("Failed to parse JSON file %s: %s", path, exc)
+        return None
+
+
+def _compute_content_fingerprint(manifest: dict[str, Any]) -> str:
+    region_hashes = [
+        {
+            "region": item.get("region"),
+            "sha256": item.get("sha256"),
+            "size_bytes": item.get("size_bytes"),
+        }
+        for item in manifest.get("downloaded_region_details", [])
+    ]
+    region_hashes.sort(key=lambda row: str(row.get("region", "")))
+
+    stable_payload = {
+        "downloaded_regions": manifest.get("downloaded_regions", []),
+        "downloaded_region_hashes": region_hashes,
+        "missing_from_index": manifest.get("missing_from_index", []),
+        "failed_regions": sorted(manifest.get("failed_regions", {}).keys()),
+        "status": manifest.get("status"),
+    }
+    encoded = json.dumps(stable_payload, ensure_ascii=True, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Download AWS EC2 bulk offer JSON for all AWS regions")
 
@@ -181,12 +238,17 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="For testing only: limit number of regions to process; 0 means all",
     )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Logging level",
+    )
 
     return parser.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
+def _run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     run_started = time.perf_counter()
 
     regions_excel = _ensure_path(Path(args.regions_excel))
@@ -204,6 +266,7 @@ def main() -> None:
     snapshot_dir = snapshots_dir / timestamp
     snapshot_dir.mkdir(parents=True, exist_ok=True)
 
+    LOGGER.info("Load AWS region list from %s", regions_excel)
     aws_regions = _load_aws_regions_from_excel(
         excel_path=regions_excel,
         cloud_col=args.cloud_column,
@@ -211,8 +274,10 @@ def main() -> None:
     )
     if args.max_regions and args.max_regions > 0:
         aws_regions = aws_regions[: args.max_regions]
+        LOGGER.info("Max regions enabled, processing %s regions", len(aws_regions))
 
     index_url = f"{args.aws_base_url}/offers/v1.0/aws/AmazonEC2/current/region_index.json"
+    LOGGER.info("Fetch region index from %s", index_url)
     index_raw = _get_bytes_with_retry(
         url=index_url,
         timeout=args.timeout,
@@ -247,6 +312,7 @@ def main() -> None:
 
         region_urls[region] = f"{args.aws_base_url}{current_version_url}"
 
+    LOGGER.info("Download %s region offer files", len(region_urls))
     with ThreadPoolExecutor(max_workers=max(1, args.max_workers)) as executor:
         future_to_region = {
             executor.submit(
@@ -272,13 +338,15 @@ def main() -> None:
                 failed[region] = str(exc)
                 exc_name = type(exc).__name__
                 failed_type_counts[exc_name] = failed_type_counts.get(exc_name, 0) + 1
+                LOGGER.error("Failed download for region=%s: %s", region, exc)
 
     downloaded.sort()
     missing_from_index.sort()
     downloaded_region_details.sort(key=lambda item: str(item.get("region", "")))
 
+    status = "ok" if not failed else "partial"
     manifest = {
-        "status": "ok" if not failed else "partial",
+        "status": status,
         "script_version": SCRIPT_VERSION,
         "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "duration_seconds": round(time.perf_counter() - run_started, 3),
@@ -305,23 +373,60 @@ def main() -> None:
         "failed_type_counts": failed_type_counts,
     }
 
-    snapshot_manifest_path = snapshot_dir / "manifest.json"
-    snapshot_manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    manifest["content_fingerprint"] = _compute_content_fingerprint(manifest)
+
+    previous_manifest = _load_json_if_exists(current_dir / "manifest.json")
+    previous_fingerprint = None
+    if isinstance(previous_manifest, dict):
+        previous_fingerprint = previous_manifest.get("content_fingerprint")
+
+    no_change = bool(previous_fingerprint and previous_fingerprint == manifest["content_fingerprint"])
+    manifest["no_change"] = no_change
+
+    if no_change:
+        LOGGER.info("No content change detected, keep current snapshot and remove temp snapshot %s", timestamp)
+        shutil.rmtree(snapshot_dir)
+    else:
+        snapshot_manifest_path = snapshot_dir / "manifest.json"
+        snapshot_manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        _refresh_current_dir(snapshot_dir=snapshot_dir, current_dir=current_dir)
 
     run_manifest_path = manifests_dir / f"{timestamp}.json"
     run_manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     latest_path = output_root / "latest.json"
     latest_payload = {
-        "latest_snapshot": timestamp,
+        "latest_snapshot": manifest["snapshot"],
         "latest_manifest": str(run_manifest_path.relative_to(output_root)).replace("\\", "/"),
+        "no_change": no_change,
     }
     latest_path.write_text(json.dumps(latest_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    _refresh_current_dir(snapshot_dir=snapshot_dir, current_dir=current_dir)
+    if failed:
+        return EXIT_PARTIAL, manifest
+    return EXIT_SUCCESS, manifest
 
-    print(json.dumps(manifest, ensure_ascii=False))
+
+def main() -> int:
+    args = parse_args()
+    _setup_logging(args.log_level)
+
+    try:
+        exit_code, manifest = _run(args)
+        print(json.dumps(manifest, ensure_ascii=False))
+        return exit_code
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.exception("Fatal error: %s", exc)
+        error_payload = {
+            "status": "fatal",
+            "script_version": SCRIPT_VERSION,
+            "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+        print(json.dumps(error_payload, ensure_ascii=False))
+        return EXIT_FATAL
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

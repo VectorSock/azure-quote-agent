@@ -27,6 +27,14 @@ python .github/skills/vm-pricing-retail-api/scripts/fetch_vm_prices.py --input-f
 2. AWS 侧优先 GetProducts；若 boto3 不可用或 GetProducts 失败，自动回退 offer file 模式。
 3. RI 小时折算口径：hourly = total_term_price / (term_years * 12 * 730)。
 
+## AWS EC2 Offer 数据维护
+- 本地刷新脚本：
+python scripts/maintenance/refresh_aws_ec2_bulk_offers.py
+- 可选参数示例：
+python scripts/maintenance/refresh_aws_ec2_bulk_offers.py --regions-excel .github/skills/global-region-mapping/assets/get_regions.xlsx --output-root .github/skills/vm-pricing-retail-api/assets/aws_ec2_bulk_offers
+- GitHub Actions：
+.github/workflows/refresh-aws-ec2-bulk-offers.yml
+
 ## 列名规范
 统一列名请参考：
 .github/skills/references/column-schema.md

@@ -3,14 +3,14 @@
 本文档定义 VM 报价流水线中各 skill 的关键输入/输出列契约，避免“上游有值、下游读不到”的问题。
 
 ## 流水线顺序
-1. `excel-input-extraction`
+1. `scripts/extract_excel_inputs.py`
 2. `region-mapping`
 3. `vm-aws-instance-to-config`
 4. `vm-config-to-azure-instance`
 5. `vm-pricing-retail-api`
 6. `excel-quote-writer`
 
-## Step 1: excel-input-extraction
+## Step 1: scripts/extract_excel_inputs.py
 
 ### 关键输出列
 - `nrm_id`

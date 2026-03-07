@@ -7,10 +7,9 @@ import re
 from pathlib import Path
 from typing import Any
 
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
-
 import pandas as pd
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 AWS_INSTANCE_RE = re.compile(r"^[a-z][a-z0-9]*\d+[a-z0-9]*\.[a-z0-9]+$", re.IGNORECASE)
 
 COLUMN_ALIASES: dict[str, list[str]] = {
@@ -164,7 +163,6 @@ RESOURCE_TYPE_ALIASES: dict[str, str] = {
 
 
 def normalize_resource_type(raw: str) -> str:
-    """Map common resource-type synonyms to a canonical value."""
     key = raw.strip().lower()
     if key in RESOURCE_TYPE_ALIASES:
         return RESOURCE_TYPE_ALIASES[key]

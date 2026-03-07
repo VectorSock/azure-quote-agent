@@ -22,7 +22,7 @@ class Step:
 
 
 DEFAULT_STEPS: list[Step] = [
-    Step("step_01_extract", ".github/skills/excel-input-extraction/scripts/extract_excel_inputs.py"),
+    Step("step_01_extract", "scripts/extract_excel_inputs.py"),
     Step("step_02_region_mapping", ".github/skills/region-mapping/scripts/region_mapping.py"),
     Step("step_03_aws_instance_to_config", ".github/skills/vm-aws-instance-to-config/scripts/aws_instance_indicators.py"),
     Step("step_04_config_to_azure_instance", ".github/skills/vm-config-to-azure-instance/scripts/vm-config-to-azure-instance.py"),

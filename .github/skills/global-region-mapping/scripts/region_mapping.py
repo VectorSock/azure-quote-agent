@@ -276,10 +276,24 @@ def detect_column(df: pd.DataFrame, preferred: str | None) -> str:
             raise ValueError(f"指定列不存在: {preferred}")
         return preferred
 
-    lowered = {str(col).strip().lower(): col for col in df.columns}
-    for candidate in ["region", "location", "city", "site", "区域", "地区", "城市"]:
-        if candidate in lowered:
-            return str(lowered[candidate])
+    normalized_cols = {_normalize(str(col)): col for col in df.columns}
+    aliases = [
+        "region_input",
+        "region",
+        "location",
+        "city",
+        "site",
+        "region_name",
+        "region long name",
+        "区域",
+        "地区",
+        "城市",
+        "地域",
+    ]
+    for alias in aliases:
+        key = _normalize(alias)
+        if key in normalized_cols:
+            return str(normalized_cols[key])
 
     raise ValueError("未找到位置列，请通过 --column 指定")
 

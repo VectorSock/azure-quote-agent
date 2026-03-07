@@ -1,10 +1,9 @@
 import argparse
 import json
-import shutil
 from pathlib import Path
 from typing import Any, Dict, List
 
-from openpyxl import load_workbook
+from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 
 
@@ -145,8 +144,12 @@ def _as_bool(value: Any, default: bool = True) -> bool:
 
 def init_template(template_path: Path) -> None:
     template_path.parent.mkdir(parents=True, exist_ok=True)
-    from openpyxl import Workbook
 
+    wb = _build_template_workbook()
+    wb.save(template_path)
+
+
+def _build_template_workbook() -> Workbook:
     wb = Workbook()
     ws_summary = wb.active
     ws_summary.title = "Summary"
@@ -229,7 +232,7 @@ def init_template(template_path: Path) -> None:
     for idx, header in enumerate(evd_headers, start=1):
         ws_evd.cell(1, idx, header)
 
-    wb.save(template_path)
+    return wb
 
 
 def load_payload(input_json: Path) -> Dict[str, Any]:
@@ -513,14 +516,10 @@ def _apply_summary_number_formats(ws) -> None:
         ws[f"{col}14"].number_format = '0.00%'
 
 
-def write_quote_excel(payload: Dict[str, Any], output_xlsx: Path, template: Path) -> Dict[str, Any]:
-    if not template.exists():
-        raise FileNotFoundError(f"template not found: {template}")
-
+def write_quote_excel(payload: Dict[str, Any], output_xlsx: Path) -> Dict[str, Any]:
     output_xlsx.parent.mkdir(parents=True, exist_ok=True)
 
-    shutil.copyfile(template, output_xlsx)
-    workbook = load_workbook(output_xlsx)
+    workbook = _build_template_workbook()
 
     summary_sheet = workbook["Summary"]
     line_sheet = workbook["LineItems"]
@@ -572,33 +571,28 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Write structured quote payload into Excel workbook.")
     parser.add_argument("--input-json", help="Path to structured quote JSON payload.")
     parser.add_argument("--output-xlsx", help="Output Excel path.")
-    parser.add_argument(
-        "--template",
-        default=".github/skills/global-quote-writer/assets/summary-layout-template.xlsx",
-        help="Template workbook path.",
-    )
     parser.add_argument("--init-template", action="store_true", help="Initialize template workbook and exit.")
     args = parser.parse_args()
 
-    template = Path(args.template)
-
     try:
         if args.init_template:
-            init_template(template)
+            if not args.output_xlsx:
+                raise ValueError("`--output-xlsx` is required when `--init-template` is used")
+            init_template(Path(args.output_xlsx))
             _print(
                 {
                     "status": "ok",
                     "message": "template initialized",
-                    "template_file": str(template),
+                    "template_file": str(Path(args.output_xlsx)),
                 }
             )
             return
 
         if not args.input_json or not args.output_xlsx:
-            raise ValueError("`--input-json` and `--output-xlsx` are required unless `--init-template` is used")
+            raise ValueError("`--input-json` and `--output-xlsx` are required")
 
         payload = load_payload(Path(args.input_json))
-        result = write_quote_excel(payload, Path(args.output_xlsx), template)
+        result = write_quote_excel(payload, Path(args.output_xlsx))
         _print(result)
 
     except Exception as exc:  # noqa: BLE001

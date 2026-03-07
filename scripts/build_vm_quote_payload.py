@@ -22,6 +22,15 @@ def safe_bool(value: Any) -> bool:
     return token in {"1", "true", "yes", "y", "on"}
 
 
+def normalize_token(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def is_review_true(value: Any) -> bool:
+    token = normalize_token(value)
+    return token in {"1", "true", "yes", "y", "on"}
+
+
 def first_non_empty(row: dict[str, Any], keys: list[str], default: Any = None) -> Any:
     for key in keys:
         value = row.get(key)
@@ -33,6 +42,87 @@ def first_non_empty(row: dict[str, Any], keys: list[str], default: Any = None) -
 def load_csv(path: Path) -> list[dict[str, Any]]:
     with path.open("r", encoding="utf-8-sig", newline="") as fp:
         return list(csv.DictReader(fp))
+
+
+def build_dynamic_review_assumptions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build assumptions from actual rows that need review instead of static policy text."""
+    assumptions: list[dict[str, Any]] = []
+
+    azure_review_items: list[str] = []
+    aws_review_items: list[str] = []
+
+    reason_to_items: dict[str, list[str]] = {}
+    seen_reason_item: set[tuple[str, str]] = set()
+
+    for idx, row in enumerate(rows, start=1):
+        item_id = str(first_non_empty(row, ["item_id", "nrm_id"], f"item-{idx}"))
+        azure_status = normalize_token(first_non_empty(row, ["azure_status"], ""))
+        aws_status = normalize_token(first_non_empty(row, ["aws_status"], ""))
+        review_flag = is_review_true(first_non_empty(row, ["review_flag", "Azure_review_flag", "AWS_review_flag"], ""))
+
+        if azure_status in {"not_found", "error", "unknown"} or review_flag:
+            azure_review_items.append(item_id)
+
+        # Skip AWS "skipped" because it's often expected in config-only flows.
+        if aws_status in {"not_found", "error", "unknown"}:
+            aws_review_items.append(item_id)
+
+        raw_reason = str(
+            first_non_empty(
+                row,
+                ["review_reason", "pricing_error", "error", "status_reason"],
+                "",
+            )
+        ).strip()
+        if raw_reason:
+            key = raw_reason
+            dedupe_key = (key, item_id)
+            if dedupe_key not in seen_reason_item:
+                seen_reason_item.add(dedupe_key)
+                reason_to_items.setdefault(key, []).append(item_id)
+
+    assumption_idx = 1
+
+    if azure_review_items:
+        assumptions.append(
+            {
+                "assumption_id": f"A-{assumption_idx}",
+                "category": "pricing_review",
+                "statement": (
+                    f"{len(azure_review_items)} item(s) have Azure pricing uncertainty "
+                    f"(status=not_found/error/unknown or review_flag=true)."
+                ),
+                "impact_scope": f"items:{'|'.join(sorted(set(azure_review_items)))}",
+                "requires_confirmation": True,
+            }
+        )
+        assumption_idx += 1
+
+    if aws_review_items:
+        assumptions.append(
+            {
+                "assumption_id": f"A-{assumption_idx}",
+                "category": "pricing_review",
+                "statement": f"{len(aws_review_items)} item(s) have AWS pricing uncertainty (status=not_found/error/unknown).",
+                "impact_scope": f"items:{'|'.join(sorted(set(aws_review_items)))}",
+                "requires_confirmation": True,
+            }
+        )
+        assumption_idx += 1
+
+    for reason, items in sorted(reason_to_items.items(), key=lambda pair: (-len(pair[1]), pair[0])):
+        assumptions.append(
+            {
+                "assumption_id": f"A-{assumption_idx}",
+                "category": "review_reason",
+                "statement": reason,
+                "impact_scope": f"items:{'|'.join(sorted(set(items)))}",
+                "requires_confirmation": True,
+            }
+        )
+        assumption_idx += 1
+
+    return assumptions
 
 
 def parse_args() -> argparse.Namespace:
@@ -157,32 +247,7 @@ def main() -> None:
             }
         )
 
-    assumptions = [
-        {
-            "key": "hourly_price_only",
-            "value": True,
-            "source": "pricing-policy",
-            "notes": "报价仅输出小时单价，不再输出 line total",
-        },
-        {
-            "key": "ri_hourly_normalization",
-            "value": "annual_total / (12 * 730)",
-            "source": "pricing-policy",
-            "notes": "若 RI 为年总价，先折算成小时单价",
-        },
-        {
-            "key": "aws_pricing_available",
-            "value": aws_available,
-            "source": "vm-pricing-retail-api",
-            "notes": "false usually means missing AWS credentials or no matched SKU",
-        },
-        {
-            "key": "azure_pricing_available",
-            "value": azure_available,
-            "source": "vm-pricing-retail-api",
-            "notes": "Azure Retail API public pricing availability",
-        },
-    ]
+    assumptions = build_dynamic_review_assumptions(rows)
 
     summary = {
         "customer_project": args.customer_project,
@@ -218,6 +283,7 @@ def main() -> None:
                 "output_json": output_json.as_posix(),
                 "aws_pricing_available": aws_available,
                 "azure_pricing_available": azure_available,
+                "review_assumptions": len(assumptions),
             },
             ensure_ascii=False,
         )

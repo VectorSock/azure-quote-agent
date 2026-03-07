@@ -34,7 +34,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from shared.sap_inference import detect_role, infer_sap_workload, normalize_env, normalize_text
+from scripts.sap_inference import detect_role, infer_sap_workload, normalize_env, normalize_text
 
 
 def resolve_project_root() -> Path:
@@ -847,7 +847,7 @@ def map_single(
         network_optimized=network_optimized,
         prefer_amd=prefer_amd,
     )
-    candidate_pool_size = max(fallback_count, 24)
+    candidate_pool_size = max(fallback_count, 2)
     primary_sku, fallback_skus = build_candidates(
         family,
         effective_vcpu,

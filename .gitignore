@@ -15,6 +15,7 @@ data/output/
 # =========================
 # Generated pricing assets (AUTO-GENERATED)
 # =========================
+.github/skills/vm-pricing-retail-api/assets/aws_ec2_bulk_offers/
 .github/skills/vm-pricing-retail-api/assets/aws_ec2_bulk_offers/current/
 .github/skills/vm-pricing-retail-api/assets/aws_ec2_bulk_offers/snapshots/
 .github/skills/vm-pricing-retail-api/assets/aws_ec2_bulk_offers/manifests/

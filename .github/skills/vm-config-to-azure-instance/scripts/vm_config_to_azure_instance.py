@@ -6,6 +6,8 @@ import json
 import math
 import re
 import os
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any
 import sys
@@ -13,6 +15,7 @@ import sys
 
 SAP_MEMORY_PER_VCPU_GB = 8.0
 SUPPORTED_VCPU_STEPS = [2, 4, 8, 16, 20, 24, 32, 48, 64, 72, 80, 96, 104, 112, 120, 128, 144, 176, 192]
+APP_LS_DISK_GB_THRESHOLD = 500.0
 
 APP_DB_POLICIES = {"strict", "balanced", "cost-first"}
 RANKING_WEIGHTS = {
@@ -23,6 +26,9 @@ RANKING_WEIGHTS = {
 
 SKU_PARSE_PATTERN = re.compile(r"^Standard_([A-Za-z]+)(\d+)([a-z]*)")
 _CATALOG_CACHE: dict[str, dict[str, Any]] = {}
+
+AZURE_RETAIL_API_URL = "https://prices.azure.com/api/retail/prices"
+_RETAIL_PRICE_CACHE: dict[str, dict[str, Any]] = {}
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 if str(PROJECT_ROOT) not in sys.path:
@@ -174,6 +180,7 @@ def estimate_cost_score(family: str, suffix: str) -> float:
         "N": 3.0,
     }.get(family.upper(), 1.2)
     suffix_factor = {
+        "ls": 0.9,
         "as": 0.95,
         "a": 0.97,
         "s": 1.0,
@@ -183,6 +190,185 @@ def estimate_cost_score(family: str, suffix: str) -> float:
     }.get(suffix.lower(), 1.04)
     rough_cost = family_factor * suffix_factor
     return 1.0 / (1.0 + rough_cost)
+
+
+# ---------------------------------------------------------------------------
+# Azure Retail Prices API helpers for version resolution & real pricing
+# ---------------------------------------------------------------------------
+
+def _retail_api_get_json(url: str, timeout: int = 15) -> dict[str, Any]:
+    req = urllib.request.Request(url, headers={"User-Agent": "vm-config-to-azure-instance/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _retail_api_fetch_all(url: str, timeout: int = 15, max_pages: int = 10) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    next_url: str | None = url
+    page = 0
+    while next_url and page < max_pages:
+        payload = _retail_api_get_json(next_url, timeout=timeout)
+        page_items = payload.get("Items", [])
+        if isinstance(page_items, list):
+            items.extend(item for item in page_items if isinstance(item, dict))
+        next_url = payload.get("NextPageLink")
+        page += 1
+    return items
+
+
+def _is_base_vm_line(item: dict[str, Any]) -> bool:
+    text = " ".join([
+        str(item.get("meterName") or ""),
+        str(item.get("skuName") or ""),
+        str(item.get("productName") or ""),
+    ]).lower()
+    bad = ["spot", "low priority", "dedicated host", "dev test", "cloud services", "promotion"]
+    return not any(t in text for t in bad)
+
+
+def _os_matches_item(item: dict[str, Any], os_name: str | None) -> bool:
+    if not os_name:
+        return True
+    text = " ".join([
+        str(item.get("productName") or ""),
+        str(item.get("meterName") or ""),
+        str(item.get("skuName") or ""),
+    ]).lower()
+    if os_name == "windows":
+        return "windows" in text
+    return "windows" not in text
+
+
+def _sku_generation_num(sku: str) -> int | None:
+    m = re.search(r"_v(\d+)$", str(sku or "").strip(), re.IGNORECASE)
+    return int(m.group(1)) if m else None
+
+
+def _strip_sku_version(sku: str) -> str:
+    """Standard_E4as_v5 -> Standard_E4as_"""
+    m = re.search(r"^(.*)_v\d+$", str(sku or "").strip(), re.IGNORECASE)
+    return f"{m.group(1)}_" if m else str(sku or "").strip()
+
+
+def _select_best_sku_from_api(sku_prices: dict[str, float]) -> dict[str, Any]:
+    """Pick best SKU: cheapest v5+, else cheapest v4+, else latest generation."""
+    if not sku_prices:
+        return {"resolved_sku": None, "paygo_hourly_usd": None, "generation": None, "selection_mode": "not_found"}
+
+    sku_gens = {s: _sku_generation_num(s) for s in sku_prices}
+
+    # Prefer cheapest among v5+
+    v5_plus = {s: p for s, p in sku_prices.items() if (sku_gens.get(s) or 0) >= 5}
+    if v5_plus:
+        best = min(v5_plus, key=lambda s: v5_plus[s])
+        return {"resolved_sku": best, "paygo_hourly_usd": v5_plus[best], "generation": sku_gens[best], "selection_mode": "v5_plus_cheapest"}
+
+    # Else cheapest among v4+
+    v4_plus = {s: p for s, p in sku_prices.items() if (sku_gens.get(s) or 0) >= 4}
+    if v4_plus:
+        best = min(v4_plus, key=lambda s: v4_plus[s])
+        return {"resolved_sku": best, "paygo_hourly_usd": v4_plus[best], "generation": sku_gens[best], "selection_mode": "v4_plus_cheapest"}
+
+    # Else latest generation
+    numeric_gens = [g for g in sku_gens.values() if g is not None]
+    if numeric_gens:
+        max_gen = max(numeric_gens)
+        latest = {s: p for s, p in sku_prices.items() if sku_gens.get(s) == max_gen}
+        best = min(latest, key=lambda s: latest[s])
+        return {"resolved_sku": best, "paygo_hourly_usd": latest[best], "generation": max_gen, "selection_mode": "latest_gen"}
+
+    # No generation info
+    best = min(sku_prices, key=lambda s: sku_prices[s])
+    return {"resolved_sku": best, "paygo_hourly_usd": sku_prices[best], "generation": None, "selection_mode": "unversioned_cheapest"}
+
+
+def resolve_and_price_candidates(
+    candidates: list[str],
+    azure_region: str,
+    os_name: str | None,
+    timeout: int = 15,
+) -> tuple[list[str], dict[str, float]]:
+    """
+    Resolve candidate SKUs to actual versions via Azure Retail Prices API.
+
+    For each unique SKU prefix (family+size+suffix), queries the API to find
+    all available generations, then selects the best one:
+      - cheapest among v5+ if any exist
+      - else cheapest among v4+
+      - else latest generation
+
+    Returns:
+        resolved_candidates: list of resolved SKU names (order preserved, deduped)
+        real_prices: dict mapping resolved_sku -> paygo_hourly_usd
+    """
+    prefix_to_candidates: dict[str, list[str]] = {}
+    for sku in candidates:
+        prefix = _strip_sku_version(sku)
+        if prefix not in prefix_to_candidates:
+            prefix_to_candidates[prefix] = []
+        prefix_to_candidates[prefix].append(sku)
+
+    resolved_map: dict[str, str] = {}  # original_sku -> resolved_sku
+    real_prices: dict[str, float] = {}  # resolved_sku -> price
+
+    for prefix, original_skus in prefix_to_candidates.items():
+        cache_key = f"{prefix}|{azure_region}|{os_name or 'linux'}"
+
+        if cache_key in _RETAIL_PRICE_CACHE:
+            info = _RETAIL_PRICE_CACHE[cache_key]
+        else:
+            try:
+                filter_expr = (
+                    f"serviceName eq 'Virtual Machines' "
+                    f"and armRegionName eq '{azure_region}' "
+                    f"and startswith(armSkuName, '{prefix}')"
+                )
+                query_str = urllib.parse.urlencode({"currencyCode": "USD", "$filter": filter_expr})
+                url = f"{AZURE_RETAIL_API_URL}?{query_str}"
+                items = _retail_api_fetch_all(url, timeout=timeout)
+
+                consumption = [
+                    item for item in items
+                    if str(item.get("type") or "").lower() == "consumption"
+                    and _is_base_vm_line(item)
+                    and _os_matches_item(item, os_name)
+                ]
+
+                sku_prices: dict[str, float] = {}
+                for item in consumption:
+                    arm_sku = str(item.get("armSkuName") or "").strip()
+                    price = parse_optional_float(item.get("retailPrice"))
+                    if arm_sku and price is not None:
+                        if arm_sku not in sku_prices or price < sku_prices[arm_sku]:
+                            sku_prices[arm_sku] = price
+
+                info = _select_best_sku_from_api(sku_prices)
+            except Exception:  # noqa: BLE001
+                info = {"resolved_sku": None, "paygo_hourly_usd": None, "generation": None, "selection_mode": "api_error"}
+
+            _RETAIL_PRICE_CACHE[cache_key] = info
+
+        resolved_sku = info.get("resolved_sku")
+        price = info.get("paygo_hourly_usd")
+
+        for orig_sku in original_skus:
+            if resolved_sku:
+                resolved_map[orig_sku] = resolved_sku
+                if price is not None:
+                    real_prices[resolved_sku] = price
+            else:
+                resolved_map[orig_sku] = orig_sku
+
+    # Build resolved candidates list, preserving order and deduping
+    seen: set[str] = set()
+    resolved_candidates: list[str] = []
+    for sku in candidates:
+        resolved = resolved_map.get(sku, sku)
+        if resolved not in seen:
+            seen.add(resolved)
+            resolved_candidates.append(resolved)
+
+    return resolved_candidates, real_prices
 
 
 def rank_candidates(
@@ -195,6 +381,8 @@ def rank_candidates(
     required_iops: float | None,
     required_network_mbps: float | None,
     required_disk_throughput_mbps: float | None,
+    prefer_ls_for_app: bool = False,
+    real_prices: dict[str, float] | None = None,
 ) -> list[dict[str, Any]]:
     weights = RANKING_WEIGHTS.get(policy, RANKING_WEIGHTS["strict"])
     ranked: list[dict[str, Any]] = []
@@ -226,8 +414,21 @@ def rank_candidates(
             perf_components.append(normalized_gap_score(float(actual_value or 0.0), required_value))
         perf_score = sum(perf_components) / len(perf_components) if perf_components else 0.5
 
-        cost_score = estimate_cost_score(shape["family"], shape["suffix"])
+        if real_prices and sku in real_prices:
+            # Real price: lower price -> higher score via 1/(1+price)
+            cost_score = 1.0 / (1.0 + real_prices[sku])
+        else:
+            cost_score = estimate_cost_score(shape["family"], shape["suffix"])
         total = fit_score * weights["fit"] + perf_score * weights["perf"] + cost_score * weights["cost"]
+
+        # In APP + large-disk scenarios, prefer D-ls candidates to surface them earlier.
+        if prefer_ls_for_app:
+            if shape["family"].upper() == "D" and shape["suffix"].lower() == "ls":
+                total += 0.08
+            elif shape["family"].upper() == "D" and shape["suffix"].lower() in {"as", "a", "s", "ds", "d", ""}:
+                total += 0.02
+            elif shape["family"].upper() == "F":
+                total -= 0.03
 
         ranked.append(
             {
@@ -300,8 +501,8 @@ def infer_workload_profile(
         if env_norm == "prd":
             mapping_path = "app_db_prd_hana"
             if app_db_policy == "strict":
-                sap_cert_required = bool(sap_detected or memory_gb > 256)
-                prefer_m_family = memory_gb > 256
+                sap_cert_required = bool(sap_detected or memory_gb >= 256)
+                prefer_m_family = memory_gb >= 256
                 preferred_family = "M" if prefer_m_family else "E"
             elif app_db_policy == "cost-first":
                 sap_cert_required = False
@@ -309,18 +510,18 @@ def infer_workload_profile(
                 preferred_family = "E"
             else:
                 sap_cert_required = bool(is_core_suite and sap_detected and memory_gb >= 256)
-                prefer_m_family = memory_gb > 512
+                prefer_m_family = memory_gb >= 512
                 preferred_family = "M" if prefer_m_family else "E"
         else:
             mapping_path = "app_db_nonprd_app"
             sap_cert_required = False
             prefer_m_family = False
-            preferred_family = "E" if memory_gb > 128 else "D"
+            preferred_family = "E" if memory_gb >= 128 else "D"
     elif role == "db":
         mapping_path = "db_hana"
         if app_db_policy == "strict":
-            sap_cert_required = bool((is_core_suite and sap_detected) or sap_detected or memory_gb > 256)
-            prefer_m_family = memory_gb > 256
+            sap_cert_required = bool((is_core_suite and sap_detected) or sap_detected or memory_gb >= 256)
+            prefer_m_family = memory_gb >= 256
             preferred_family = "M" if prefer_m_family else "E"
         elif app_db_policy == "cost-first":
             sap_cert_required = False
@@ -328,18 +529,18 @@ def infer_workload_profile(
             preferred_family = "E"
         else:
             sap_cert_required = bool(is_core_suite and sap_detected and env_norm == "prd" and memory_gb >= 384)
-            prefer_m_family = memory_gb > 512
+            prefer_m_family = memory_gb >= 512
             preferred_family = "M" if prefer_m_family else "E"
     elif role == "app" and sap_detected:
         mapping_path = "sap_app"
         sap_cert_required = False
         prefer_m_family = False
-        preferred_family = "E" if memory_gb > 128 else "D"
+        preferred_family = "E" if memory_gb >= 128 else "D"
     else:
         mapping_path = "generic"
         sap_cert_required = False
         prefer_m_family = False
-        preferred_family = "E" if memory_gb > 256 else "D"
+        preferred_family = "E" if memory_gb >= 256 else "D"
 
     return {
         "env": env_norm,
@@ -370,10 +571,8 @@ def pick_sap_certified_sku(
     azure_region: str | None,
     os_name: str | None,
 ) -> str | None:
-    region = str(azure_region or "").strip().lower()
-    normalized_os = str(os_name or "").strip().lower()
     candidates = []
-    for item in catalog.values():
+    for sku, item in catalog.items():
         if not bool(item.get("sap_certified", False)):
             continue
         item_vcpu = int(float(item.get("vcpu") or 0))
@@ -381,15 +580,17 @@ def pick_sap_certified_sku(
         if item_memory < required_memory_gb or item_vcpu < required_vcpu:
             continue
 
-        supported_regions = [str(v).strip().lower() for v in (item.get("supported_regions") or []) if str(v).strip()]
-        if supported_regions and region and region not in supported_regions:
-            continue
-
-        supported_os = [str(v).strip().lower() for v in (item.get("supported_os") or []) if str(v).strip()]
-        if supported_os and normalized_os and normalized_os not in supported_os:
-            continue
-
-        candidates.append(item)
+        # Reuse support_gate_for_candidate for region/OS filtering
+        passed, _ = support_gate_for_candidate(
+            sku=sku,
+            catalog_entry=item,
+            azure_region=azure_region,
+            os_name=os_name,
+            sap_cert_required=True,
+            pam_supported=None,
+        )
+        if passed:
+            candidates.append(item)
 
     if not candidates:
         return None
@@ -405,9 +606,7 @@ def pick_sap_certified_sku(
         candidates,
         key=lambda item: (family_rank(str(item["sku"])), item["memory_gb"], item["vcpu"]),
     )
-    for item in ordered:
-        return str(item["sku"])
-    return None
+    return str(ordered[0]["sku"]) if ordered else None
 
 
 def family_from_shape(vcpu: int, memory_gb: float, burstable: bool, gpu: bool) -> str:
@@ -430,6 +629,8 @@ def choose_version(family: str) -> str:
     if token in {"D", "E"}:
         return "_v5"
     if token == "F":
+        return "_v2"
+    if token == "M":
         return "_v2"
     if token.startswith("N"):
         return "_v3"
@@ -465,13 +666,15 @@ def features_from_config(
     return "".join(features)
 
 
-def candidate_families(primary: str) -> list[str]:
+def candidate_families(primary: str, prefer_ls_for_app: bool = False) -> list[str]:
     token = primary.upper()
     if token == "D":
         return ["D", "E", "F"]
     if token == "E":
         return ["E", "M", "D"]
     if token == "F":
+        if prefer_ls_for_app:
+            return ["D", "F", "E"]
         return ["F", "D", "E"]
     if token == "N":
         return ["N", "E", "D"]
@@ -480,7 +683,7 @@ def candidate_families(primary: str) -> list[str]:
     return [token, "D", "E", "F"]
 
 
-def fallback_features(primary_features: str, family: str) -> list[str]:
+def fallback_features(primary_features: str, family: str, prefer_ls: bool = False) -> list[str]:
     family_token = family.upper()
     values = [primary_features]
 
@@ -488,6 +691,8 @@ def fallback_features(primary_features: str, family: str) -> list[str]:
         candidates = ["", "a"]
     else:
         candidates = ["as", "s", "a", "ds", "d", ""]
+        if family_token == "D" and prefer_ls:
+            candidates = ["ls", *candidates]
 
     for candidate in candidates:
         if candidate not in values:
@@ -495,17 +700,29 @@ def fallback_features(primary_features: str, family: str) -> list[str]:
     return values
 
 
-def build_candidates(primary_family: str, vcpu: int, features: str, fallback_count: int) -> tuple[str, list[str]]:
+def build_candidates(
+    primary_family: str,
+    vcpu: int,
+    features: str,
+    fallback_count: int,
+    required_memory_gb: float,
+    prefer_ls_for_app: bool,
+) -> tuple[str, list[str]]:
     primary = f"Standard_{primary_family}{vcpu}{features}{choose_version(primary_family)}"
     candidates: list[str] = [primary]
 
-    for family in candidate_families(primary_family):
+    for family in candidate_families(primary_family, prefer_ls_for_app=prefer_ls_for_app):
         sizes_to_try = [vcpu]
+        family_min_vcpu = min_vcpu_for_family_by_memory(family, required_memory_gb)
+        if family_min_vcpu > 0:
+            sizes_to_try.append(round_vcpu_for_sku(family_min_vcpu))
         if family in {"D", "E", "F", "M"}:
             sizes_to_try.append(vcpu * 2)
 
-        for candidate_vcpu in sizes_to_try:
-            for suffix in fallback_features(features, family):
+        unique_sizes = sorted({item for item in sizes_to_try if item > 0})
+
+        for candidate_vcpu in unique_sizes:
+            for suffix in fallback_features(features, family, prefer_ls=prefer_ls_for_app):
                 sku = f"Standard_{family}{candidate_vcpu}{suffix}{choose_version(family)}"
                 if sku not in candidates:
                     candidates.append(sku)
@@ -551,6 +768,7 @@ def map_single(
     system: str | None,
     env: str | None,
     workload_type: str | None,
+    disk_gb: float | None,
     sap_workload: bool | None,
     cpu_vendor: str,
     cpu_arch: str,
@@ -604,11 +822,15 @@ def map_single(
         family = "M" if profile["prefer_m_family"] else "E"
     elif profile["mapping_path"] == "sap_app":
         memory_ratio = memory_gb / max(vcpu, 1)
-        family = "E" if (memory_ratio >= 6.0 or memory_gb > 128) else "D"
+        family = "E" if (memory_ratio >= 6.0 or memory_gb >= 128) else "D"
     elif preferred_family in {"D", "E", "M"} and (sap_mode or profile["mapping_path"].startswith("app_db")):
         family = preferred_family
     else:
         family = family_from_shape(vcpu, memory_gb, effective_family_burstable, effective_family_gpu)
+
+    prefer_ls_for_app = bool(profile["role"] == "app" and (disk_gb or 0.0) >= APP_LS_DISK_GB_THRESHOLD)
+    if prefer_ls_for_app:
+        mapping_notes.append("app_large_disk_prefer_ls_suffix")
 
     min_vcpu_by_family_memory = min_vcpu_for_family_by_memory(family, memory_gb)
     if min_vcpu_by_family_memory > 0 and effective_vcpu < min_vcpu_by_family_memory:
@@ -625,10 +847,28 @@ def map_single(
         network_optimized=network_optimized,
         prefer_amd=prefer_amd,
     )
-    primary_sku, fallback_skus = build_candidates(family, effective_vcpu, features, fallback_count)
+    candidate_pool_size = max(fallback_count, 24)
+    primary_sku, fallback_skus = build_candidates(
+        family,
+        effective_vcpu,
+        features,
+        candidate_pool_size,
+        required_memory_gb=memory_gb,
+        prefer_ls_for_app=prefer_ls_for_app,
+    )
     confidence = confidence_score(family, effective_vcpu, memory_gb, effective_family_burstable, effective_family_gpu)
 
     all_candidates = [primary_sku, *fallback_skus]
+
+    # Resolve SKU versions and fetch real prices via Azure Retail Prices API
+    real_prices: dict[str, float] = {}
+    if azure_region:
+        resolved_candidates, real_prices = resolve_and_price_candidates(
+            all_candidates, azure_region, os_name,
+        )
+        if resolved_candidates:
+            primary_sku = resolved_candidates[0]
+            all_candidates = resolved_candidates
 
     gate_kept: list[str] = []
     gate_rejected: list[dict[str, Any]] = []
@@ -646,9 +886,11 @@ def map_single(
         else:
             gate_rejected.append({"sku": sku, "reasons": reasons})
 
+    review_flag = False
     if not gate_kept:
         gate_kept = all_candidates
         mapping_notes.append("support_gate_all_rejected_fallback_to_original_candidates")
+        review_flag = True
 
     ranked = rank_candidates(
         candidates=gate_kept,
@@ -659,6 +901,8 @@ def map_single(
         required_iops=required_iops,
         required_network_mbps=required_network_mbps,
         required_disk_throughput_mbps=required_disk_throughput_mbps,
+        prefer_ls_for_app=prefer_ls_for_app,
+        real_prices=real_prices if real_prices else None,
     )
     ranked_skus = [item["sku"] for item in ranked]
 
@@ -700,6 +944,10 @@ def map_single(
     else:
         assumptions.append("perf_signals_applied_in_ranking")
     assumptions.append(f"workload_mapping_path:{profile['mapping_path']}")
+    if real_prices:
+        assumptions.append("real_retail_prices_applied_in_ranking")
+    else:
+        assumptions.append("estimated_cost_used_no_retail_api")
     assumptions.extend(mapping_notes)
 
     return {
@@ -711,6 +959,7 @@ def map_single(
             "system": system,
             "env": env,
             "workload_type": workload_type,
+            "disk_gb": disk_gb,
             "sap_workload": sap_workload,
             "cpu_vendor": cpu_vendor,
             "cpu_arch": cpu_arch,
@@ -742,6 +991,7 @@ def map_single(
         "ranking": ranked,
         "mapping_confidence": round(confidence, 2),
         "matched_by": "shape_and_feature_policy",
+        "review_flag": review_flag,
         "assumptions": assumptions,
     }
 
@@ -805,6 +1055,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--system", help="system name, e.g. S4/Fiori/Zabbix")
     parser.add_argument("--env", help="environment, e.g. DEV/QAS/PRD")
     parser.add_argument("--workload-type", help="workload role, e.g. APP/DB/APP+DB")
+    parser.add_argument("--disk-gb", type=float, help="disk size in GB for APP large disk heuristics")
     parser.add_argument("--sap-workload", help="optional explicit SAP workload boolean")
     parser.add_argument("--local-temp-disk", action="store_true")
     parser.add_argument("--network-optimized", action="store_true")
@@ -858,6 +1109,7 @@ def main() -> None:
         for row in rows:
             vcpu_value = first_non_empty(row, ["vcpu", "parsed_vcpu"], 0)
             memory_value = first_non_empty(row, ["memory_gb", "parsed_memory_gb"], 0)
+            disk_value = first_non_empty(row, ["disk_gb", "disk", "storage"], None)
             app_db_policy = normalize_policy(first_non_empty(row, ["app_db_policy"], None), env_policy)
             azure_region = str(
                 first_non_empty(row, ["mapped_azure_region", "azure_region", "region_azure"], "")
@@ -883,6 +1135,7 @@ def main() -> None:
                 system=str(first_non_empty(row, ["system", "application", "landscape_system"], "")).strip() or None,
                 env=str(first_non_empty(row, ["env", "environment"], "")).strip() or None,
                 workload_type=str(first_non_empty(row, ["workload_type", "role", "tier"], "")).strip() or None,
+                disk_gb=parse_optional_float(disk_value),
                 sap_workload=parse_optional_bool(first_non_empty(row, ["SAP_workload", "sap_workload"], None)),
                 cpu_vendor=cpu_vendor,
                 cpu_arch=str(first_non_empty(row, ["cpu_arch", "parsed_cpu_arch"], "x86_64")).strip().lower(),
@@ -922,6 +1175,7 @@ def main() -> None:
                     "app_db_policy": app_db_policy,
                     "mapping_confidence": result.get("mapping_confidence"),
                     "matched_by": result.get("matched_by"),
+                    "review_flag": result.get("review_flag"),
                     "assumptions": "|".join(result.get("assumptions", [])),
                     "support_gate_kept": "|".join(result.get("support_gate_kept", [])),
                     "support_gate_rejected": json.dumps(result.get("support_gate_rejected", []), ensure_ascii=False),
@@ -961,6 +1215,7 @@ def main() -> None:
         system=args.system,
         env=args.env,
         workload_type=args.workload_type,
+        disk_gb=args.disk_gb,
         sap_workload=parse_optional_bool(args.sap_workload),
         cpu_vendor=args.cpu_vendor,
         cpu_arch=args.cpu_arch,

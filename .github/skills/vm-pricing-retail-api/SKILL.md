@@ -31,7 +31,7 @@ python .github/skills/vm-pricing-retail-api/scripts/fetch_vm_prices.py --input-f
 - 本地刷新脚本：
 python scripts/maintenance/refresh_aws_ec2_bulk_offers.py
 - 可选参数示例：
-python scripts/maintenance/refresh_aws_ec2_bulk_offers.py --regions-excel .github/skills/global-region-mapping/assets/get_regions.xlsx --output-root .github/skills/vm-pricing-retail-api/assets/aws_ec2_bulk_offers
+python scripts/maintenance/refresh_aws_ec2_bulk_offers.py --regions-excel data/rget_regions.xlsx --output-root .github/skills/vm-pricing-retail-api/assets/aws_ec2_bulk_offers
 - GitHub Actions：
 .github/workflows/refresh-aws-ec2-bulk-offers.yml
 

@@ -136,7 +136,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--competitor-cloud", default="AWS", help="Summary competitor cloud")
     parser.add_argument(
         "--pricing-source-note",
-        default="Azure Retail Prices API + AWS Pricing API (GetProducts)",
+        default="Azure Retail Prices API + AWS EC2 Offer File",
         help="Summary pricing source note",
     )
     return parser.parse_args()

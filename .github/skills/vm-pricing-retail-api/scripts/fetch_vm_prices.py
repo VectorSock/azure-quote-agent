@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import json
 import re
@@ -168,6 +169,11 @@ def _filter_azure_items_by_sku(items: list[dict[str, Any]], sku: str | None) -> 
 
 
 def fetch_azure_vm_prices(sku: str, region: str, os_name: str, timeout: int) -> dict[str, Any]:
+    cache_key = _azure_request_key(sku, region, os_name)
+    cached = _AZURE_PRICE_CACHE.get(cache_key)
+    if cached is not None:
+        return copy.deepcopy(cached)
+
     family_prefix = azure_family_prefix(sku)
     filter_expr = (
         f"serviceName eq 'Virtual Machines' and armRegionName eq '{region}' "
@@ -238,7 +244,7 @@ def fetch_azure_vm_prices(sku: str, region: str, os_name: str, timeout: int) -> 
         ri_3y, ri_3y_meta = pick_ri_hourly(3)
 
         status = "ok" if any(v is not None for v in [paygo, ri_1y, ri_3y]) else "not_found"
-        return {
+        result = {
             "status": status,
             "source_url": url,
             "paygo_hourly_usd": paygo,
@@ -256,8 +262,10 @@ def fetch_azure_vm_prices(sku: str, region: str, os_name: str, timeout: int) -> 
                 "ri_3y": ri_3y_meta,
             },
         }
+        _AZURE_PRICE_CACHE[cache_key] = result
+        return copy.deepcopy(result)
     except Exception as exc:
-        return {
+        result = {
             "status": "error",
             "source_url": url,
             "error": str(exc),
@@ -266,6 +274,8 @@ def fetch_azure_vm_prices(sku: str, region: str, os_name: str, timeout: int) -> 
             "ri_3y_hourly_usd": None,
             "review_flag": False,
         }
+        _AZURE_PRICE_CACHE[cache_key] = result
+        return copy.deepcopy(result)
 
 
 def aws_os_name(os_name: str) -> str:
@@ -275,6 +285,7 @@ def aws_os_name(os_name: str) -> str:
 _AWS_REGION_INDEX_CACHE: dict[str, Any] | None = None
 _AWS_REGION_PAYLOAD_CACHE: dict[str, dict[str, Any]] = {}
 _AWS_LOCATION_NAME_CACHE: dict[str, str] | None = None
+_AZURE_PRICE_CACHE: dict[tuple[str, str, str], dict[str, Any]] = {}
 
 
 def resolve_project_root() -> Path:
@@ -282,7 +293,9 @@ def resolve_project_root() -> Path:
 
 
 def _load_aws_location_mapping_from_asset() -> dict[str, str]:
-    mapping_file = resolve_project_root() / ".github" / "skills" / "global-region-mapping" / "assets" / "get_regions.xlsx"
+    mapping_file = resolve_project_root() / "data" / "rget_regions.xlsx"
+    if not mapping_file.exists():
+        mapping_file = resolve_project_root() / "data" / "get_regions.xlsx"
     if not mapping_file.exists():
         return {}
 
@@ -649,80 +662,21 @@ def _extract_aws_ri(products: list[dict[str, Any]], years: int) -> tuple[float |
 
 def fetch_aws_vm_prices(instance_type: str, region: str, os_name: str, timeout: int) -> dict[str, Any]:
     try:
-        if boto3 is None or Config is None:
-            return _fetch_aws_vm_prices_from_offer_file(
-                instance_type=instance_type,
-                region=region,
-                os_name=os_name,
-                timeout=timeout,
-            )
-
-        filters = _aws_base_filters(instance_type, region, os_name)
-        products = _aws_get_products(filters=filters, timeout=timeout)
-        match_mode = "regionCode"
-
-        if not products:
-            location_filters = [
-                item
-                for item in filters
-                if item.get("Field") != "regionCode"
-            ]
-            location_filters.append(
-                {"Type": "TERM_MATCH", "Field": "location", "Value": _aws_region_location_name(region)}
-            )
-            products = _aws_get_products(filters=location_filters, timeout=timeout)
-            match_mode = "location"
-
-        if not products:
-            return {
-                "status": "not_found",
-                "source_url": "aws-pricing-api:get_products",
-                "sku_match_mode": "none",
-                "paygo_hourly_usd": None,
-                "ri_1y_hourly_usd": None,
-                "ri_3y_hourly_usd": None,
-            }
-
-        paygo, paygo_meta = _extract_aws_paygo(products)
-        ri_1y, ri_1y_meta = _extract_aws_ri(products, 1)
-        ri_3y, ri_3y_meta = _extract_aws_ri(products, 3)
-
-        status = "ok" if any(v is not None for v in [paygo, ri_1y, ri_3y]) else "not_found"
-        return {
-            "status": status,
-            "source_url": "aws-pricing-api:get_products",
-            "sku_match_mode": match_mode,
-            "paygo_hourly_usd": paygo,
-            "ri_1y_hourly_usd": ri_1y,
-            "ri_3y_hourly_usd": ri_3y,
-            "meta": {
-                "paygo": paygo_meta,
-                "ri_1y": ri_1y_meta,
-                "ri_3y": ri_3y_meta,
-                "matched_products": len(products),
-            },
-        }
+        return _fetch_aws_vm_prices_from_offer_file(
+            instance_type=instance_type,
+            region=region,
+            os_name=os_name,
+            timeout=timeout,
+        )
     except Exception as exc:
-        try:
-            fallback = _fetch_aws_vm_prices_from_offer_file(
-                instance_type=instance_type,
-                region=region,
-                os_name=os_name,
-                timeout=timeout,
-            )
-            fallback.setdefault("meta", {})
-            fallback["meta"]["get_products_error"] = str(exc)
-            fallback["meta"]["fallback_reason"] = "get_products_failed"
-            return fallback
-        except Exception as fallback_exc:
-            return {
-                "status": "error",
-                "error": str(exc),
-                "fallback_error": str(fallback_exc),
-                "paygo_hourly_usd": None,
-                "ri_1y_hourly_usd": None,
-                "ri_3y_hourly_usd": None,
-            }
+        return {
+            "status": "error",
+            "error": str(exc),
+            "source_url": "aws-offer-file",
+            "paygo_hourly_usd": None,
+            "ri_1y_hourly_usd": None,
+            "ri_3y_hourly_usd": None,
+        }
 
 
 def first_non_empty(row: dict[str, Any], keys: list[str], default: Any = None) -> Any:
@@ -736,6 +690,31 @@ def first_non_empty(row: dict[str, Any], keys: list[str], default: Any = None) -
 def normalize_os(os_value: Any) -> str:
     token = str(os_value or "linux").strip().lower()
     return "windows" if token == "windows" else "linux"
+
+
+def infer_compete_cloud(row: dict[str, Any]) -> str:
+    token = str(
+        first_non_empty(
+            row,
+            [
+                "compete_cloud",
+                "competitor_cloud",
+                "provider",
+                "cloud",
+            ],
+            "",
+        )
+        or ""
+    ).strip().lower()
+    return token
+
+
+def _azure_request_key(sku: str, region: str, os_name: str) -> tuple[str, str, str]:
+    return (str(sku).strip(), str(region).strip(), normalize_os(os_name))
+
+
+def _aws_request_key(instance_type: str, region: str, os_name: str) -> tuple[str, str, str]:
+    return (str(instance_type).strip(), str(region).strip(), normalize_os(os_name))
 
 
 def run_query(
@@ -825,7 +804,10 @@ def main() -> None:
         with input_file.open("r", encoding="utf-8-sig", newline="") as fp:
             rows = list(csv.DictReader(fp))
 
-        output_rows: list[dict[str, Any]] = []
+        prepared_rows: list[dict[str, Any]] = []
+        azure_keys: set[tuple[str, str, str]] = set()
+        aws_keys: set[tuple[str, str, str]] = set()
+
         for row in rows:
             aws_instance_type = first_non_empty(row, ["aws_instance_type", "instance_type"])
             aws_region = first_non_empty(row, ["aws_region", "mapped_aws_region", "region_aws"])
@@ -833,9 +815,64 @@ def main() -> None:
             sap_sku = first_non_empty(row, ["sap_sku"])
             azure_region = first_non_empty(row, ["azure_region", "mapped_azure_region", "region_azure"])
             os_name = normalize_os(first_non_empty(row, ["os"], "linux"))
+            compete_cloud = infer_compete_cloud(row)
 
-            skip_aws = args.skip_aws or not (aws_instance_type and aws_region)
+            # If source data explicitly says the competitor cloud is AWS, do not skip AWS pricing.
+            # This guards against accidental --skip-aws usage in quote comparison workflows.
+            force_compare_aws = compete_cloud == "aws"
+            skip_aws = (args.skip_aws and not force_compare_aws) or not (aws_instance_type and aws_region)
             skip_azure = args.skip_azure or not (azure_sku and azure_region)
+
+            prepared_rows.append(
+                {
+                    "row": row,
+                    "aws_instance_type": str(aws_instance_type) if aws_instance_type else None,
+                    "aws_region": str(aws_region) if aws_region else None,
+                    "azure_sku": str(azure_sku) if azure_sku else None,
+                    "sap_sku": str(sap_sku) if sap_sku else None,
+                    "azure_region": str(azure_region) if azure_region else None,
+                    "os_name": os_name,
+                    "skip_aws": skip_aws,
+                    "skip_azure": skip_azure,
+                }
+            )
+
+            if not skip_azure and azure_sku and azure_region:
+                azure_keys.add(_azure_request_key(str(azure_sku), str(azure_region), os_name))
+            if sap_sku and azure_region:
+                azure_keys.add(_azure_request_key(str(sap_sku), str(azure_region), os_name))
+            if not skip_aws and aws_instance_type and aws_region:
+                aws_keys.add(_aws_request_key(str(aws_instance_type), str(aws_region), os_name))
+
+        azure_results: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for azure_sku, azure_region, os_name in azure_keys:
+            azure_results[(azure_sku, azure_region, os_name)] = fetch_azure_vm_prices(
+                sku=azure_sku,
+                region=azure_region,
+                os_name=os_name,
+                timeout=args.timeout,
+            )
+
+        aws_results: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for aws_instance_type, aws_region, os_name in aws_keys:
+            aws_results[(aws_instance_type, aws_region, os_name)] = fetch_aws_vm_prices(
+                instance_type=aws_instance_type,
+                region=aws_region,
+                os_name=os_name,
+                timeout=args.timeout,
+            )
+
+        output_rows: list[dict[str, Any]] = []
+        for prepared in prepared_rows:
+            row = prepared["row"]
+            aws_instance_type = prepared["aws_instance_type"]
+            aws_region = prepared["aws_region"]
+            azure_sku = prepared["azure_sku"]
+            sap_sku = prepared["sap_sku"]
+            azure_region = prepared["azure_region"]
+            os_name = prepared["os_name"]
+            skip_aws = bool(prepared["skip_aws"])
+            skip_azure = bool(prepared["skip_azure"])
 
             if skip_aws and skip_azure:
                 result: dict[str, Any] = {
@@ -852,20 +889,37 @@ def main() -> None:
                     "azure": {"status": "skipped"},
                 }
             else:
-                result = run_query(
-                    aws_instance_type=str(aws_instance_type) if aws_instance_type else None,
-                    aws_region=str(aws_region) if aws_region else None,
-                    azure_sku=str(azure_sku) if azure_sku else None,
-                    azure_region=str(azure_region) if azure_region else None,
-                    os_name=os_name,
-                    timeout=args.timeout,
-                    skip_aws=skip_aws,
-                    skip_azure=skip_azure,
-                )
+                result = {
+                    "status": "ok",
+                    "fetched_at": now_iso(),
+                    "input": {
+                        "aws_instance_type": aws_instance_type,
+                        "aws_region": aws_region,
+                        "azure_sku": azure_sku,
+                        "azure_region": azure_region,
+                        "os": os_name,
+                    },
+                }
+
+                if skip_azure:
+                    result["azure"] = {"status": "skipped"}
+                else:
+                    azure_key = _azure_request_key(str(azure_sku), str(azure_region), os_name)
+                    result["azure"] = copy.deepcopy(azure_results[azure_key])
+
+                if skip_aws:
+                    result["aws"] = {"status": "skipped"}
+                else:
+                    aws_key = _aws_request_key(str(aws_instance_type), str(aws_region), os_name)
+                    result["aws"] = copy.deepcopy(aws_results[aws_key])
+
+                if result.get("azure", {}).get("status") == "error" and result.get("aws", {}).get("status") == "error":
+                    result["status"] = "error"
 
             sap_azure: dict[str, Any] = {"status": "skipped"}
             if sap_sku and azure_region:
-                sap_azure = fetch_azure_vm_prices(str(sap_sku), str(azure_region), os_name, args.timeout)
+                sap_key = _azure_request_key(str(sap_sku), str(azure_region), os_name)
+                sap_azure = copy.deepcopy(azure_results[sap_key])
 
             merged = dict(row)
             merged.update(

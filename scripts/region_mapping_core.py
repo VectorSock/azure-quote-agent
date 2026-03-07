@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import argparse
-import json
 from dataclasses import dataclass
 from math import hypot
 from pathlib import Path
@@ -10,13 +8,13 @@ from typing import Any
 import pandas as pd
 
 
-def _normalize(value: str | None) -> str:
+def normalize_token(value: str | None) -> str:
     if value is None:
         return ""
     return "".join(ch for ch in str(value).strip().lower() if ch.isalnum())
 
 
-def _parse_float(value: object) -> float | None:
+def parse_float(value: object) -> float | None:
     try:
         if value is None or str(value).strip() == "":
             return None
@@ -28,11 +26,13 @@ def _parse_float(value: object) -> float | None:
 @dataclass
 class RegionResolution:
     input_value: str | None
-    city: str | None
-    aws_region: str | None
-    azure_region: str | None
-    gcp_region: str | None
-    matched_by: str
+    mapped_city: str | None
+    mapped_aws_region: str | None
+    mapped_azure_region: str | None
+    mapped_gcp_region: str | None
+    mapped_by: str
+    confidence: str
+    warning: str | None
 
 
 @dataclass
@@ -93,7 +93,7 @@ class RegionResolver:
         expected_columns = {"Cloud", "Region", "City"}
         if not expected_columns.issubset(set(df.columns)):
             missing = sorted(expected_columns.difference(set(df.columns)))
-            raise ValueError(f"映射表缺少列: {missing}")
+            raise ValueError(f"mapping file missing columns: {missing}")
 
         city_index: dict[str, dict[str, str]] = {}
         city_display: dict[str, str] = {}
@@ -108,15 +108,15 @@ class RegionResolver:
             region_long_name = str(row.get("Region Long Name") or "").strip()
             city = str(row.get("City") or "").strip()
             country = str(row.get("Country") or "").strip() or None
-            latitude = _parse_float(row.get("Latitude"))
-            longitude = _parse_float(row.get("Longitude"))
+            latitude = parse_float(row.get("Latitude"))
+            longitude = parse_float(row.get("Longitude"))
 
             if cloud not in {"aws", "azure", "gcp"}:
                 continue
             if not region or not city:
                 continue
 
-            city_key = _normalize(city)
+            city_key = normalize_token(city)
             city_display.setdefault(city_key, city)
             city_index.setdefault(city_key, {})[cloud] = region
 
@@ -127,7 +127,7 @@ class RegionResolver:
                     "longitude": longitude,
                 }
 
-            region_index[_normalize(region)] = (cloud, city_key)
+            region_index[normalize_token(region)] = (cloud, city_key)
 
             if cloud == "azure":
                 azure_geo_entries.append(
@@ -141,7 +141,7 @@ class RegionResolver:
                 )
 
             if region_long_name:
-                region_long_name_index[_normalize(region_long_name)] = {
+                region_long_name_index[normalize_token(region_long_name)] = {
                     "cloud": cloud,
                     "city_key": city_key,
                     "country": country,
@@ -161,7 +161,7 @@ class RegionResolver:
     def resolve(self, location_input: str | None, default_azure_region: str) -> RegionResolution:
         raw = (location_input or "").strip()
         probe = raw or default_azure_region
-        probe_key = _normalize(probe)
+        probe_key = normalize_token(probe)
 
         if probe_key in self.city_index:
             city_key = probe_key
@@ -174,11 +174,13 @@ class RegionResolver:
             )
             return RegionResolution(
                 input_value=location_input,
-                city=self.city_display.get(city_key),
-                aws_region=regions.get("aws"),
-                azure_region=azure_region or default_azure_region,
-                gcp_region=regions.get("gcp"),
-                matched_by="city_name" if regions.get("azure") else "city_geo",
+                mapped_city=self.city_display.get(city_key),
+                mapped_aws_region=regions.get("aws"),
+                mapped_azure_region=azure_region or default_azure_region,
+                mapped_gcp_region=regions.get("gcp"),
+                mapped_by="city_name" if regions.get("azure") else "city_geo",
+                confidence="high",
+                warning=None,
             )
 
         if probe_key in self.region_index:
@@ -192,11 +194,13 @@ class RegionResolver:
             )
             return RegionResolution(
                 input_value=location_input,
-                city=self.city_display.get(city_key),
-                aws_region=regions.get("aws"),
-                azure_region=azure_region or (probe.lower() if "-" not in probe else default_azure_region),
-                gcp_region=regions.get("gcp"),
-                matched_by="region_id" if regions.get("azure") else "city_geo",
+                mapped_city=self.city_display.get(city_key),
+                mapped_aws_region=regions.get("aws"),
+                mapped_azure_region=azure_region or (probe.lower() if "-" not in probe else default_azure_region),
+                mapped_gcp_region=regions.get("gcp"),
+                mapped_by="region_id" if regions.get("azure") else "city_geo",
+                confidence="high",
+                warning=None,
             )
 
         if probe_key in self.region_long_name_index:
@@ -210,74 +214,48 @@ class RegionResolver:
             )
             return RegionResolution(
                 input_value=location_input,
-                city=self.city_display.get(city_key),
-                aws_region=regions.get("aws"),
-                azure_region=azure_region or default_azure_region,
-                gcp_region=regions.get("gcp"),
-                matched_by="region_long_name" if regions.get("azure") else "city_geo",
+                mapped_city=self.city_display.get(city_key),
+                mapped_aws_region=regions.get("aws"),
+                mapped_azure_region=azure_region or default_azure_region,
+                mapped_gcp_region=regions.get("gcp"),
+                mapped_by="region_long_name" if regions.get("azure") else "city_geo",
+                confidence="high",
+                warning=None,
             )
 
+        warning = "Low-confidence fallback mapping. Please verify mapped regions manually."
         return RegionResolution(
             input_value=location_input,
-            city=None,
-            aws_region=probe.lower() if "-" in probe else None,
-            azure_region=probe.lower() if "-" not in probe else default_azure_region,
-            gcp_region=None,
-            matched_by="fallback",
+            mapped_city=None,
+            mapped_aws_region=probe.lower() if "-" in probe else None,
+            mapped_azure_region=probe.lower() if "-" not in probe else default_azure_region,
+            mapped_gcp_region=None,
+            mapped_by="fallback",
+            confidence="low",
+            warning=warning,
         )
 
 
-def resolve_project_root() -> Path:
-    return Path(__file__).resolve().parents[4]
-
-
-def resolve_mapping_file(path_arg: str | None) -> Path:
-    if path_arg:
-        path = Path(path_arg)
-        return path if path.is_absolute() else resolve_project_root() / path
-
-    candidates = [
-        resolve_project_root() / ".github" / "skills" / "global-region-mapping" / "assets" / "get_regions.xlsx",
-        resolve_project_root() / "skills" / "global-region-mapping" / "assets" / "get_regions.xlsx",
-        resolve_project_root() / "data" / "get_regions.xlsx",
-        Path(__file__).resolve().parents[1] / "assets" / "get_regions.xlsx",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-
-    return candidates[0]
-
-
-def load_input(input_path: Path) -> pd.DataFrame:
-    suffix = input_path.suffix.lower()
-    if suffix == ".csv":
-        return pd.read_csv(input_path)
-    if suffix in {".xlsx", ".xls"}:
-        return pd.read_excel(input_path)
-    raise ValueError(f"不支持的输入文件类型: {suffix}")
-
-
-def write_output(df: pd.DataFrame, output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    suffix = output_path.suffix.lower()
-    if suffix == ".csv":
-        df.to_csv(output_path, index=False)
-        return
-    if suffix in {".xlsx", ".xls"}:
-        df.to_excel(output_path, index=False)
-        return
-    raise ValueError(f"不支持的输出文件类型: {suffix}")
+def format_resolution(result: RegionResolution) -> dict[str, Any]:
+    return {
+        "mapped_city": result.mapped_city,
+        "mapped_aws_region": result.mapped_aws_region,
+        "mapped_azure_region": result.mapped_azure_region,
+        "mapped_gcp_region": result.mapped_gcp_region,
+        "mapped_by": result.mapped_by,
+        "confidence": result.confidence,
+        "warning": result.warning,
+    }
 
 
 def detect_column(df: pd.DataFrame, preferred: str | None) -> str:
     if preferred:
         if preferred not in df.columns:
-            raise ValueError(f"指定列不存在: {preferred}")
+            raise ValueError(f"column does not exist: {preferred}")
         return preferred
 
-    normalized_cols = {_normalize(str(col)): col for col in df.columns}
-    aliases = [
+    lowered = {str(col).strip().lower(): col for col in df.columns}
+    for candidate in [
         "region_input",
         "region",
         "location",
@@ -289,114 +267,95 @@ def detect_column(df: pd.DataFrame, preferred: str | None) -> str:
         "地区",
         "城市",
         "地域",
-    ]
-    for alias in aliases:
-        key = _normalize(alias)
-        if key in normalized_cols:
-            return str(normalized_cols[key])
+    ]:
+        if candidate in lowered:
+            return str(lowered[candidate])
 
-    raise ValueError("未找到位置列，请通过 --column 指定")
+    raise ValueError("location column not found, pass --column")
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Region mapping skill")
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--location", help="单条位置输入")
-    group.add_argument("--input-file", help="批量输入文件路径")
-
-    parser.add_argument("--column", help="批量输入位置列名")
-    parser.add_argument("--output", default="output/region_mapping_results.csv", help="批量输出文件路径")
-    parser.add_argument("--mapping-file", help="映射表路径")
-    parser.add_argument("--default-azure-region", default="eastasia", help="回退 Azure Region")
-    return parser.parse_args()
+def load_input(input_path: Path) -> pd.DataFrame:
+    suffix = input_path.suffix.lower()
+    if suffix == ".csv":
+        return pd.read_csv(input_path)
+    if suffix in {".xlsx", ".xls"}:
+        return pd.read_excel(input_path)
+    raise ValueError(f"unsupported input file type: {suffix}")
 
 
-def format_result(result: RegionResolution) -> dict[str, Any]:
-    return {
-        "input_value": result.input_value,
-        "city": result.city,
-        "aws_region": result.aws_region,
-        "azure_region": result.azure_region,
-        "gcp_region": result.gcp_region,
-        "matched_by": result.matched_by,
+def write_output(df: pd.DataFrame, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    suffix = output_path.suffix.lower()
+    if suffix == ".csv":
+        df.to_csv(output_path, index=False)
+        return
+    if suffix in {".xlsx", ".xls"}:
+        df.to_excel(output_path, index=False)
+        return
+    raise ValueError(f"unsupported output file type: {suffix}")
+
+
+def resolve_locations(
+    resolver: RegionResolver,
+    locations: list[str | None],
+    default_azure_region: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    rows = [format_resolution(resolver.resolve(location, default_azure_region)) for location in locations]
+    fallback_count = sum(1 for row in rows if row["mapped_by"] == "fallback")
+    resolved_count = len(rows) - fallback_count
+    hit_rate = (resolved_count / len(rows)) if rows else 0.0
+    stats = {
+        "rows": len(rows),
+        "fallback_count": fallback_count,
+        "resolved_count": resolved_count,
+        "hit_rate": hit_rate,
     }
+    return rows, stats
 
 
-def run_single(resolver: RegionResolver, location: str, default_azure_region: str) -> None:
-    result = resolver.resolve(location, default_azure_region)
-    print(json.dumps(format_result(result), ensure_ascii=False))
-
-
-def run_batch(
+def resolve_file(
     resolver: RegionResolver,
     input_file: Path,
     output_file: Path,
     column: str | None,
     default_azure_region: str,
-) -> None:
+) -> dict[str, Any]:
     df = load_input(input_file)
     location_col = detect_column(df, column)
-
-    mapped = []
+    raw_locations: list[str | None] = []
     for value in df[location_col].tolist():
-        location = None if pd.isna(value) else str(value)
-        mapped.append(format_result(resolver.resolve(location, default_azure_region)))
+        raw_locations.append(None if pd.isna(value) else str(value))
 
-    mapped_df = pd.DataFrame(mapped).rename(
-        columns={
-            "city": "mapped_city",
-            "aws_region": "mapped_aws_region",
-            "azure_region": "mapped_azure_region",
-            "gcp_region": "mapped_gcp_region",
-            "matched_by": "mapped_by",
-        }
-    )
-    result_df = pd.concat([df.reset_index(drop=True), mapped_df.drop(columns=["input_value"])], axis=1)
+    mapped_rows, stats = resolve_locations(resolver, raw_locations, default_azure_region)
+    mapped_df = pd.DataFrame(mapped_rows)
+    result_df = pd.concat([df.reset_index(drop=True), mapped_df], axis=1)
     write_output(result_df, output_file)
 
-    summary = {
+    return {
         "status": "ok",
-        "rows": len(result_df),
+        "rows": stats["rows"],
+        "fallback_count": stats["fallback_count"],
+        "hit_rate": stats["hit_rate"],
+        "location_column": location_col,
         "input_file": str(input_file.as_posix()),
         "output_file": str(output_file.as_posix()),
-        "location_column": location_col,
     }
-    print(json.dumps(summary, ensure_ascii=False))
 
 
-def main() -> None:
-    args = parse_args()
-
-    mapping_file = resolve_mapping_file(args.mapping_file)
-    if not mapping_file.exists():
-        raise FileNotFoundError(
-            "未找到映射表，请提供 --mapping-file 或确认 skills/global-region-mapping/assets/get_regions.xlsx 存在"
-        )
-
-    resolver = RegionResolver.from_excel(mapping_file)
-
-    if args.location is not None:
-        run_single(resolver, args.location, args.default_azure_region)
-        return
-
-    input_file = Path(args.input_file)
-    if not input_file.is_absolute():
-        input_file = resolve_project_root() / input_file
-    if not input_file.exists():
-        raise FileNotFoundError(f"输入文件不存在: {input_file.as_posix()}")
-
-    output_file = Path(args.output)
-    if not output_file.is_absolute():
-        output_file = resolve_project_root() / output_file
-
-    run_batch(
-        resolver=resolver,
-        input_file=input_file,
-        output_file=output_file,
-        column=args.column,
-        default_azure_region=args.default_azure_region,
-    )
+def resolve_project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
 
 
-if __name__ == "__main__":
-    main()
+def resolve_mapping_file(path_arg: str | None) -> Path:
+    if path_arg:
+        path = Path(path_arg)
+        return path if path.is_absolute() else resolve_project_root() / path
+
+    candidates = [
+        resolve_project_root() / "data" / "rget_regions.xlsx",
+        resolve_project_root() / "data" / "get_regions.xlsx",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]

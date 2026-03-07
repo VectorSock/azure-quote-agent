@@ -39,7 +39,7 @@ jobs:
       - name: Refresh AWS EC2 offer files
         run: |
           python scripts/maintenance/refresh_aws_ec2_bulk_offers.py \
-            --regions-excel .github/skills/global-region-mapping/assets/get_regions.xlsx \
+            --regions-excel data/rget_regions.xlsx \
             --output-root .github/skills/vm-pricing-retail-api/assets/aws_ec2_bulk_offers \
             --max-regions "${{ inputs.max_regions || '0' }}"
 

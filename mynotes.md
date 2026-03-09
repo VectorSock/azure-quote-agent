@@ -1,0 +1,22 @@
+# azure quote agent 所思所想
+- 为什么选择 agent over pipeline/workflow?
+	- agent 错误处理 & 动态决策能力：当它调用查价接口失败时，它能看懂错误信息，并自动尝试换一个参数重试
+	- 对于 Azure Quote 这样未来要接入几百种服务的系统，用固定连线去处理每一种服务的询价逻辑是灾难性的，目前的思路是，整体的“接收 Excel -> 解析 -> 报价 -> 输出”是一个固定 Workflow，但其中的“解析竞品架构并映射到 Azure SKU”这一步，交给一个具备自我纠错能力的 Agent 去处理
+- 如何选择 skill/mcp/agent/普通 script?
+	- skill/mcp/agent/普通 script都可以用来规范 agent 工作过程中重用的部分
+	- skill 适合承载“知识 + 非严格流程”，它是软逻辑，引导模型的推理方向。
+	- 脚本适合“可重复且确定性执行”，- 比如把计算好的价格相加、或者把 JSON 转换为 Excel。这里不需要哪怕一点点 AI 的幻觉。
+	- MCP 适合“需要稳定工具接口、可参数化、多轮调用”的能力，将 Azure Retail Prices API、内部的历史报价数据库等封装成稳定、可参数化调用的工具；更固化的请求，更适合写在接口里用 MCP 实现
+	- 可复用推理流程（Skill）”还是“可调用工具能力（MCP Tool）
+		- Skill 更像“操作手册/流程提示词”，适合引导模型按步骤做事。
+		- MCP 更像“稳定工具 API”，适合把重能力（PDF 解析、外部服务调用、文件输出）做成可复用函数
+	- 业务越需要发散和推理 -> 用 Agent + Skill；业务越需要严格收敛 -> 用 Script + MCP
+- 具体实操中的 thinker
+	- 每个 SKILL 的颗粒度，要分多细，到达什么样一个规模的任务应该设立为一个单独的 skill
+	- Agent 时代，context is everything
+	- 排查 Workflow 只需要看哪个节点红了；排查 Agent 则需要深入阅读它的“思考轨迹 (Trace)”。在系统设计初，就要做好把 Agent 的思考过程打印到日志里的准备
+	- 构建 Evals (评测机制)：怎么证明这个 Agent 写得好？在开发初期准备历史真实报价单测试
+- business 维度，这个quote agent workshop的价值
+	- 2026年：token business，卖给 developer，卖给白领，卖给普通工作者：把复杂的知识，转化为 API 调用
+	- 软件正在从 UI 转向 Agent，为什么 AI 在 CLI 里像神，在 GUI 里像小白，未来的趋势更多是应用去适配 agent 的工作方式
+	- GitHub Copilot 代码能力增强，更强的代码工具赋能，对现代工作方式/现代工作者的影响：例如，提升了团队整体的战斗力下限

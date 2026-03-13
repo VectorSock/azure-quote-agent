@@ -293,14 +293,17 @@ def resolve_project_root() -> Path:
 
 
 def _load_aws_location_mapping_from_asset() -> dict[str, str]:
-    mapping_file = resolve_project_root() / "data" / "rget_regions.xlsx"
+    mapping_file = resolve_project_root() / "data" / "get_regions.csv"
     if not mapping_file.exists():
-        mapping_file = resolve_project_root() / "data" / "get_regions.xlsx"
+        mapping_file = resolve_project_root() / "data" / "rget_regions.csv"
     if not mapping_file.exists():
         return {}
 
     try:
-        df = pd.read_excel(mapping_file)
+        if mapping_file.suffix.lower() == ".csv":
+            df = pd.read_csv(mapping_file)
+        else:
+            df = pd.read_excel(mapping_file)
     except Exception:  # noqa: BLE001
         return {}
 

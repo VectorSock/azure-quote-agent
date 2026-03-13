@@ -1,0 +1,147 @@
+Cloud,Region,Region Long Name,Continent,Country,CountryCode,City,Low CO2 Region,Resource Enabled (supports VMs and Disks sizing),Availability Zones Count,Latitude,Longitude,Paired Region (Azure Only)
+AWS,af-south-1,Africa (Cape Town),Africa,South Africa,ZA,Cape Town,False,True,3,-33.9249,18.4241,
+AWS,ap-east-1,Asia Pacific (Hong Kong),Asia,Hong Kong,HK,Hong Kong,False,True,3,22.3193,114.1694,
+AWS,ap-east-2,Asia Pacific (Taipei),Asia,Taiwan,TW,Taipei,False,True,3,25.033,121.5654,
+AWS,ap-northeast-1,Asia Pacific (Tokyo),Asia,Japan,JP,Tokyo,False,True,4,35.6762,139.6503,
+AWS,ap-northeast-2,Asia Pacific (Seoul),Asia,South Korea,KR,Seoul,False,True,4,37.5665,126.978,
+AWS,ap-northeast-3,Asia Pacific (Osaka),Asia,Japan,JP,Osaka,False,True,3,34.6937,135.5023,
+AWS,ap-south-1,Asia Pacific (Mumbai),Asia,India,IN,Mumbai,False,True,3,19.076,72.8777,
+AWS,ap-south-2,Asia Pacific (Hyderabad),Asia,India,IN,Hyderabad,False,True,3,17.385,78.4867,
+AWS,ap-southeast-1,Asia Pacific (Singapore),Asia,Singapore,SG,Singapore,False,True,3,1.3521,103.8198,
+AWS,ap-southeast-2,Asia Pacific (Sydney),Asia,Australia,AU,Sydney,False,True,3,-33.8688,151.2093,
+AWS,ap-southeast-3,Asia Pacific (Jakarta),Asia,Indonesia,ID,Jakarta,False,True,3,-6.2088,106.8456,
+AWS,ap-southeast-4,Asia Pacific (Melbourne),Asia,Australia,AU,Melbourne,False,True,3,-37.8136,144.9631,
+AWS,ap-southeast-5,Asia Pacific (Malaysia),Asia,Malaysia,MY,Kuala Lumpur,False,True,3,3.139,101.6869,
+AWS,ap-southeast-6,Asia Pacific (New Zealand),Oceania,New Zealand,NZ,Auckland,False,True,3,-36.8485,174.7633,
+AWS,ap-southeast-7,Asia Pacific (Thailand),Asia,Thailand,TH,Bangkok,False,True,3,13.7563,100.5018,
+AWS,ca-central-1,Canada (Central),North America,Canada,CA,Toronto,True,True,3,43.6532,-79.3832,
+AWS,ca-west-1,Canada West (Calgary),North America,Canada,CA,Calgary,True,True,3,51.0447,-114.0719,
+AWS,eu-central-1,EU (Frankfurt),Europe,Germany,DE,Frankfurt,True,True,3,50.1109,8.6821,
+AWS,eu-central-2,Europe (Zurich),Europe,Switzerland,CH,Zurich,True,True,3,47.3769,8.5417,
+AWS,eu-north-1,EU (Stockholm),Europe,Sweden,SE,Stockholm,True,True,3,59.3293,18.0686,
+AWS,eu-south-1,EU (Milan),Europe,Italy,IT,Milan,False,True,3,45.4642,9.19,
+AWS,eu-south-2,Europe (Spain),Europe,Spain,ES,Zaragoza,True,True,3,41.6488,-0.8891,
+AWS,eu-west-1,EU (Ireland),Europe,Ireland,IE,Dublin,True,True,3,53.3498,-6.2603,
+AWS,eu-west-2,EU (London),Europe,United Kingdom,GB,London,True,True,3,51.5074,-0.1278,
+AWS,eu-west-3,EU (Paris),Europe,France,FR,Paris,True,True,3,48.8566,2.3522,
+AWS,il-central-1,Israel (Tel Aviv),Asia,Israel,IL,Tel Aviv,False,True,3,32.0853,34.7818,
+AWS,me-central-1,Middle East (UAE),Asia,United Arab Emirates,AE,Dubai,False,True,3,25.2048,55.2708,
+AWS,me-south-1,Middle East (Bahrain),Asia,Bahrain,BH,Manama,False,True,3,26.2041,50.5897,
+AWS,mx-central-1,Mexico (Central),North America,Mexico,MX,Querétaro,False,True,3,20.5888,-100.3899,
+AWS,sa-east-1,South America (Sao Paulo),South America,Brazil,BR,São Paulo,False,True,3,-23.5505,-46.6333,
+AWS,us-east-1,US East (N. Virginia),North America,United States,US,Northern Virginia,False,True,6,39.0458,-77.4874,
+AWS,us-east-2,US East (Ohio),North America,United States,US,Ohio,False,True,3,39.9612,-82.9988,
+AWS,us-gov-east-1,AWS GovCloud (US-East),North America,United States,US,Virginia,False,True,3,38.7173,-78.1669,
+AWS,us-gov-west-1,AWS GovCloud (US-West),North America,United States,US,Oregon,True,True,3,45.5152,-122.6784,
+AWS,us-west-1,US West (N. California),North America,United States,US,Northern California,True,True,3,37.7749,-122.4194,
+AWS,us-west-2,US West (Oregon),North America,United States,US,Oregon,True,True,4,45.5152,-122.6784,
+Azure,australiacentral,Australia Central,Asia Pacific,Australia,AU,Canberra,False,True,0,-35.3075,149.1244,australiacentral2
+Azure,australiacentral2,Australia Central 2,Asia Pacific,Australia,AU,Canberra,False,True,0,-35.3075,149.1244,australiacentral
+Azure,australiaeast,Australia East,Asia Pacific,Australia,AU,New South Wales,False,True,3,-33.86,151.2094,australiasoutheast
+Azure,australiasoutheast,Australia Southeast,Asia Pacific,Australia,AU,Victoria,False,True,0,-37.8136,144.9631,australiaeast
+Azure,austriaeast,Austria East,Europe,Austria,AT,Vienna,False,True,3,48.2092056,16.3727779,
+Azure,belgiumcentral,Belgium Central,Europe,Belgium,BE,Brussels,False,True,3,50.84553528,4.355707169,
+Azure,brazilsouth,Brazil South,South America,Brazil,BR,Sao Paulo State,False,True,3,-23.55,-46.633,southcentralus
+Azure,brazilsoutheast,Brazil Southeast,South America,Brazil,BR,Rio,False,True,0,-22.90278,-43.2075,brazilsouth
+Azure,canadacentral,Canada Central,Canada,Canada,CA,Toronto,True,True,3,43.653,-79.383,canadaeast
+Azure,canadaeast,Canada East,Canada,Canada,CA,Quebec,True,True,0,46.817,-71.217,canadacentral
+Azure,centralindia,Central India,Asia Pacific,India,IN,Pune,False,True,3,18.5822,73.9197,southindia
+Azure,centralus,Central US,US,United States,US,Iowa,False,True,3,41.5908,-93.6208,eastus2
+Azure,centraluseuap,Central US EUAP,US,Canary (US),,,False,True,0,41.5908,-93.6208,eastus2euap
+Azure,chilecentral,Chile Central,South America,Chile,CL,Santiago,False,True,3,-33.447487,-70.673676,
+Azure,chinaeast,CN East,Asia,China,CN,Shanghai,False,True,0,31.228611,121.474722,chinanorth
+Azure,chinaeast2,CN East 2,Asia,China,CN,Shanghai,False,True,0,31.228611,121.474722,chinanorth2
+Azure,chinaeast3,CN East 3,Asia,China,CN,Shanghai,False,True,0,31.228611,121.474722,chinanorth3
+Azure,chinanorth,CN North,Asia,China,CN,Beijing,False,True,0,39.906667,116.397222,chinaeast
+Azure,chinanorth2,CN North 2,Asia,China,CN,Beijing,False,True,0,39.906667,116.397222,chinaeast2
+Azure,chinanorth3,CN North 3,Asia,China,CN,Beijing,False,True,3,39.906667,116.397222,chinaeast3
+Azure,eastasia,East Asia,Asia Pacific,Asia Pacific,,Hong Kong,False,True,3,22.267,114.188,southeastasia
+Azure,eastus,East US,US,United States,US,Virginia,False,True,3,37.3719,-79.8164,westus
+Azure,eastus2,East US 2,US,United States,US,Virginia,False,True,3,36.6681,-78.3889,centralus
+Azure,eastus2euap,East US 2 EUAP,US,Canary (US),,,False,True,4,36.6681,-78.3889,centraluseuap
+Azure,eastusstg,East US STG,US,Stage (US),,Virginia,False,True,0,37.3719,-79.8164,southcentralusstg
+Azure,francecentral,France Central,Europe,France,FR,Paris,True,True,3,46.3772,2.373,francesouth
+Azure,francesouth,France South,Europe,France,FR,Marseille,True,True,0,43.8345,2.1972,francecentral
+Azure,germanynorth,Germany North,Europe,Germany,DE,Berlin,True,True,0,53.073635,8.806422,germanywestcentral
+Azure,germanywestcentral,Germany West Central,Europe,Germany,DE,Frankfurt,True,True,3,50.110924,8.682127,germanynorth
+Azure,indonesiacentral,Indonesia Central,Asia Pacific,Indonesia,ID,Jakarta,False,True,3,-6.2,106.816666,
+Azure,israelcentral,Israel Central,Middle East,Israel,IL,Israel,False,True,3,31.2655698,33.4506633,
+Azure,italynorth,Italy North,Europe,Italy,IT,Milan,False,True,3,45.46888,9.18109,
+Azure,japaneast,Japan East,Asia Pacific,Japan,JP,"Tokyo, Saitama",False,True,3,35.68,139.77,japanwest
+Azure,japanwest,Japan West,Asia Pacific,Japan,JP,Osaka,False,True,3,34.6939,135.5022,japaneast
+Azure,jioindiacentral,Jio India Central,Asia Pacific,India,IN,Nagpur,False,True,0,21.146633,79.08886,jioindiawest
+Azure,jioindiawest,Jio India West,Asia Pacific,India,IN,Jamnagar,False,True,0,22.470701,70.05773,jioindiacentral
+Azure,koreacentral,Korea Central,Asia Pacific,Korea,KR,Seoul,False,True,3,37.5665,126.978,koreasouth
+Azure,koreasouth,Korea South,Asia Pacific,Korea,KR,Busan,False,True,0,35.1796,129.0756,koreacentral
+Azure,malaysiawest,Malaysia West,Asia Pacific,Malaysia,MY,Kuala Lumpur,False,True,3,3.140853,101.693207,
+Azure,mexicocentral,Mexico Central,Mexico,Mexico,MX,Querétaro State,False,True,3,20.588818,-100.389888,
+Azure,newzealandnorth,New Zealand North,Asia Pacific,New Zealand,NZ,Auckland,False,True,3,-36.84853,174.76349,
+Azure,northcentralus,North Central US,US,United States,US,Illinois,False,True,0,41.8819,-87.6278,southcentralus
+Azure,northeurope,North Europe,Europe,Europe,,Ireland,True,True,3,53.3478,-6.2597,westeurope
+Azure,norwayeast,Norway East,Europe,Norway,NO,Norway,True,True,3,59.913868,10.752245,norwaywest
+Azure,norwaywest,Norway West,Europe,Norway,NO,Norway,True,True,0,58.969975,5.733107,norwayeast
+Azure,polandcentral,Poland Central,Europe,Poland,PL,Warsaw,False,True,3,52.23334,21.01666,
+Azure,qatarcentral,Qatar Central,Middle East,Qatar,QA,Doha,False,True,3,25.551462,51.439327,
+Azure,southafricanorth,South Africa North,Africa,South Africa,ZA,Johannesburg,False,True,3,-25.73134,28.21837,southafricawest
+Azure,southafricawest,South Africa West,Africa,South Africa,ZA,Cape Town,False,True,0,-34.075691,18.843266,southafricanorth
+Azure,southcentralus,South Central US,US,United States,US,Texas,False,True,3,29.4167,-98.5,northcentralus
+Azure,southcentralusstg,South Central US STG,US,Stage (US),,Texas,False,True,0,29.4167,-98.5,eastusstg
+Azure,southeastasia,Southeast Asia,Asia Pacific,Asia Pacific,,Singapore,False,True,3,1.283,103.833,eastasia
+Azure,southindia,South India,Asia Pacific,India,IN,Chennai,False,True,0,12.9822,80.1636,centralindia
+Azure,spaincentral,Spain Central,Europe,Spain,ES,Madrid,False,True,3,40.4259,3.4209,
+Azure,swedencentral,Sweden Central,Europe,Sweden,SE,Gävle,True,True,3,60.67488,17.14127,swedensouth
+Azure,switzerlandnorth,Switzerland North,Europe,Switzerland,CH,Zurich,True,True,3,47.451542,8.564572,switzerlandwest
+Azure,switzerlandwest,Switzerland West,Europe,Switzerland,CH,Geneva,True,True,0,46.204391,6.143158,switzerlandnorth
+Azure,uaecentral,UAE Central,Middle East,UAE,AE,Abu Dhabi,False,True,0,24.466667,54.366669,uaenorth
+Azure,uaenorth,UAE North,Middle East,UAE,AE,Dubai,False,True,3,25.266666,55.316666,uaecentral
+Azure,uksouth,UK South,UK,United Kingdom,GB,London,True,True,3,50.941,-0.799,ukwest
+Azure,ukwest,UK West,UK,United Kingdom,GB,Cardiff,True,True,0,53.427,-3.084,uksouth
+Azure,westcentralus,West Central US,US,United States,US,Wyoming,False,True,0,40.89,-110.234,westus2
+Azure,westeurope,West Europe,Europe,Europe,,Netherlands,True,True,3,52.3667,4.9,northeurope
+Azure,westindia,West India,Asia Pacific,India,IN,Mumbai,False,True,0,19.088,72.868,southindia
+Azure,westus,West US,US,United States,US,California,False,True,0,37.783,-122.417,eastus
+Azure,westus2,West US 2,US,United States,US,Washington,False,True,3,47.233,-119.852,westcentralus
+Azure,westus3,West US 3,US,United States,US,Phoenix,False,True,3,33.448376,-112.074036,eastus
+GCP,africa-south1,africa-south1,Africa,South Africa,ZA,Johannesburg,False,True,3,-26.2041,28.0473,
+GCP,asia-east1,asia-east1,Asia,Taiwan,TW,Changhua County,False,True,3,24.0518,120.5161,
+GCP,asia-east2,asia-east2,Asia,Hong Kong,HK,Hong Kong,False,True,3,22.3193,114.1694,
+GCP,asia-northeast1,asia-northeast1,Asia,Japan,JP,Tokyo,False,True,3,35.6762,139.6503,
+GCP,asia-northeast2,asia-northeast2,Asia,Japan,JP,Osaka,False,True,3,34.6937,135.5023,
+GCP,asia-northeast3,asia-northeast3,Asia,South Korea,KR,Seoul,False,True,3,37.5665,126.978,
+GCP,asia-south1,asia-south1,Asia,India,IN,Mumbai,False,True,3,19.076,72.8777,
+GCP,asia-south2,asia-south2,Asia,India,IN,Delhi,False,True,3,28.7041,77.1025,
+GCP,asia-southeast1,asia-southeast1,Asia,Singapore,SG,Jurong West,False,True,3,1.3521,103.8198,
+GCP,asia-southeast2,asia-southeast2,Asia,Indonesia,ID,Jakarta,False,True,3,-6.2088,106.8456,
+GCP,asia-southeast3,asia-southeast3,Asia,Thailand,TH,Bangkok,False,True,3,13.7563,100.5018,
+GCP,australia-southeast1,australia-southeast1,Oceania,Australia,AU,Sydney,False,True,3,-33.8688,151.2093,
+GCP,australia-southeast2,australia-southeast2,Oceania,Australia,AU,Melbourne,False,True,3,-37.8136,144.9631,
+GCP,europe-central2,europe-central2,Europe,Poland,PL,Warsaw,False,True,3,52.2297,21.0122,
+GCP,europe-north1,europe-north1,Europe,Finland,FI,Hamina,True,True,3,60.5695,27.1878,
+GCP,europe-north2,europe-north2,Europe,Sweden,SE,Stockholm,True,True,3,59.3293,18.0686,
+GCP,europe-southwest1,europe-southwest1,Europe,Spain,ES,Madrid,True,True,3,40.4168,-3.7038,
+GCP,europe-west1,europe-west1,Europe,Belgium,BE,St. Ghislain,True,True,3,50.4669,3.8247,
+GCP,europe-west10,europe-west10,Europe,Germany,DE,Berlin,False,True,3,52.52,13.405,
+GCP,europe-west12,europe-west12,Europe,Italy,IT,Turin,False,True,3,45.0703,7.6869,
+GCP,europe-west2,europe-west2,Europe,United Kingdom,GB,London,True,True,3,51.5074,-0.1278,
+GCP,europe-west3,europe-west3,Europe,Germany,DE,Frankfurt,True,True,3,50.1109,8.6821,
+GCP,europe-west4,europe-west4,Europe,Netherlands,NL,Eemshaven,True,True,3,53.4513,6.8357,
+GCP,europe-west6,europe-west6,Europe,Switzerland,CH,Zurich,True,True,3,47.3769,8.5417,
+GCP,europe-west8,europe-west8,Europe,Italy,IT,Milan,False,True,3,45.4642,9.19,
+GCP,europe-west9,europe-west9,Europe,France,FR,Paris,True,True,3,48.8566,2.3522,
+GCP,me-central1,me-central1,Asia,Qatar,QA,Doha,False,True,3,25.2854,51.531,
+GCP,me-central2,me-central2,Asia,Saudi Arabia,SA,Dammam,False,True,3,26.4207,50.0888,
+GCP,me-west1,me-west1,Asia,Israel,IL,Tel Aviv,False,True,3,32.0853,34.7818,
+GCP,northamerica-northeast1,northamerica-northeast1,North America,Canada,CA,"Montréal, Quebec",True,True,3,45.5017,-73.5673,
+GCP,northamerica-northeast2,northamerica-northeast2,North America,Canada,CA,"Toronto, Ontario",True,True,3,43.6532,-79.3832,
+GCP,northamerica-south1,northamerica-south1,North America,Mexico,MX,Queretaro,False,True,3,20.5888,-100.3899,
+GCP,southamerica-east1,southamerica-east1,South America,Brazil,BR,São Paulo,True,True,3,-23.5505,-46.6333,
+GCP,southamerica-west1,southamerica-west1,South America,Chile,CL,Santiago,False,True,3,-33.4489,-70.6693,
+GCP,us-central1,us-central1,North America,United States,US,"Council Bluffs, Iowa",True,True,4,41.2619,-95.8608,
+GCP,us-east1,us-east1,North America,United States,US,"Moncks Corner, South Carolina",True,True,3,33.196,-80.0131,
+GCP,us-east4,us-east4,North America,United States,US,"Ashburn, Virginia",True,True,3,39.0458,-77.4874,
+GCP,us-east5,us-east5,North America,United States,US,"Columbus, Ohio",True,True,3,39.9612,-82.9988,
+GCP,us-south1,us-south1,North America,United States,US,"Dallas, Texas",True,True,3,32.7767,-96.797,
+GCP,us-west1,us-west1,North America,United States,US,"The Dalles, Oregon",True,True,3,45.5947,-121.1789,
+GCP,us-west2,us-west2,North America,United States,US,"Los Angeles, California",True,True,3,34.0522,-118.2437,
+GCP,us-west3,us-west3,North America,United States,US,"Salt Lake City, Utah",True,True,3,40.7608,-111.891,
+GCP,us-west4,us-west4,North America,United States,US,"Las Vegas, Nevada",True,True,3,36.1699,-115.1398,

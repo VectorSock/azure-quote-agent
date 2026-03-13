@@ -87,8 +87,14 @@ def _get_bytes_with_retry(
     raise last_exc
 
 
-def _load_aws_regions_from_excel(excel_path: Path, cloud_col: str, region_col: str) -> list[str]:
-    df = pd.read_excel(excel_path)
+def _load_aws_regions_from_mapping(mapping_path: Path, cloud_col: str, region_col: str) -> list[str]:
+    suffix = mapping_path.suffix.lower()
+    if suffix == ".csv":
+        df = pd.read_csv(mapping_path)
+    elif suffix in {".xlsx", ".xls"}:
+        df = pd.read_excel(mapping_path)
+    else:
+        raise ValueError(f"Unsupported mapping file type: {suffix}")
     if cloud_col not in df.columns:
         raise ValueError(f"Missing required column: {cloud_col}")
     if region_col not in df.columns:
@@ -105,7 +111,7 @@ def _load_aws_regions_from_excel(excel_path: Path, cloud_col: str, region_col: s
             regions.add(region_value)
 
     if not regions:
-        raise ValueError("No AWS regions found in mapping Excel")
+        raise ValueError("No AWS regions found in mapping file")
 
     return sorted(regions)
 
@@ -211,8 +217,8 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--regions-excel",
-        default="data/rget_regions.xlsx",
-        help="Path to get_regions.xlsx",
+        default="data/get_regions.csv",
+        help="Path to mapping file (csv/xlsx)",
     )
     parser.add_argument(
         "--output-root",
@@ -267,8 +273,8 @@ def _run(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     snapshot_dir.mkdir(parents=True, exist_ok=True)
 
     LOGGER.info("Load AWS region list from %s", regions_excel)
-    aws_regions = _load_aws_regions_from_excel(
-        excel_path=regions_excel,
+    aws_regions = _load_aws_regions_from_mapping(
+        mapping_path=regions_excel,
         cloud_col=args.cloud_column,
         region_col=args.region_column,
     )

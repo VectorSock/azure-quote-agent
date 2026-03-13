@@ -88,7 +88,13 @@ class RegionResolver:
 
     @classmethod
     def from_excel(cls, excel_path: Path) -> "RegionResolver":
-        df = pd.read_excel(excel_path)
+        suffix = excel_path.suffix.lower()
+        if suffix == ".csv":
+            df = pd.read_csv(excel_path)
+        elif suffix in {".xlsx", ".xls"}:
+            df = pd.read_excel(excel_path)
+        else:
+            raise ValueError(f"unsupported mapping file type: {suffix}")
 
         expected_columns = {"Cloud", "Region", "City"}
         if not expected_columns.issubset(set(df.columns)):
@@ -352,8 +358,8 @@ def resolve_mapping_file(path_arg: str | None) -> Path:
         return path if path.is_absolute() else resolve_project_root() / path
 
     candidates = [
-        resolve_project_root() / "data" / "rget_regions.xlsx",
-        resolve_project_root() / "data" / "get_regions.xlsx",
+        resolve_project_root() / "data" / "get_regions.csv",
+        resolve_project_root() / "data" / "rget_regions.csv",
     ]
     for candidate in candidates:
         if candidate.exists():

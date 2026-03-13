@@ -101,6 +101,12 @@ def parse_optional_float(value: Any) -> float | None:
         return None
 
 
+def is_amd_sku(sku: str) -> bool:
+    shape = parse_sku_shape(sku)
+    suffix = str(shape.get("suffix") or "").lower()
+    return "a" in suffix
+
+
 def estimate_memory_by_family(family: str, vcpu: int) -> float:
     ratio = {
         "D": 4.0,
@@ -570,10 +576,13 @@ def pick_sap_certified_sku(
     catalog: dict[str, dict[str, Any]],
     azure_region: str | None,
     os_name: str | None,
+    intel_only: bool = False,
 ) -> str | None:
     candidates = []
     for sku, item in catalog.items():
         if not bool(item.get("sap_certified", False)):
+            continue
+        if intel_only and is_amd_sku(sku):
             continue
         item_vcpu = int(float(item.get("vcpu") or 0))
         item_memory = float(item.get("memory_gb") or 0)
@@ -803,11 +812,20 @@ def map_single(
         app_db_policy=app_db_policy,
     )
     sap_mode = bool(profile["sap_detected"])
+    sap_db_related = bool(sap_mode and profile["role"] in {"db", "app+db"})
     sap_cert_required = bool(profile["sap_cert_required"])
     effective_vcpu = int(vcpu)
     effective_family_burstable = burstable
     effective_family_gpu = gpu
+    effective_cpu_vendor = cpu_vendor
+    effective_prefer_amd = prefer_amd
     mapping_notes: list[str] = []
+
+    if sap_db_related:
+        # SAP DB workloads must remain on Intel; do not emit AMD suffix even when prefer_amd is enabled.
+        effective_cpu_vendor = "intel"
+        effective_prefer_amd = False
+        mapping_notes.append("sap_db_force_intel_cpu")
 
     if sap_cert_required:
         effective_family_burstable = False
@@ -839,13 +857,13 @@ def map_single(
 
     features = features_from_config(
         family=family,
-        cpu_vendor=cpu_vendor,
+        cpu_vendor=effective_cpu_vendor,
         cpu_arch=cpu_arch,
         burstable=effective_family_burstable,
         gpu=effective_family_gpu,
         local_temp_disk=local_temp_disk,
         network_optimized=network_optimized,
-        prefer_amd=prefer_amd,
+        prefer_amd=effective_prefer_amd,
     )
     candidate_pool_size = max(fallback_count, 2)
     primary_sku, fallback_skus = build_candidates(
@@ -869,6 +887,16 @@ def map_single(
         if resolved_candidates:
             primary_sku = resolved_candidates[0]
             all_candidates = resolved_candidates
+
+    if sap_db_related:
+        intel_candidates = [sku for sku in all_candidates if not is_amd_sku(sku)]
+        if intel_candidates:
+            all_candidates = intel_candidates
+            if primary_sku not in all_candidates:
+                primary_sku = all_candidates[0]
+            mapping_notes.append("sap_db_amd_candidates_removed")
+        else:
+            mapping_notes.append("sap_db_intel_candidate_missing_keep_original")
 
     gate_kept: list[str] = []
     gate_rejected: list[dict[str, Any]] = []
@@ -914,6 +942,7 @@ def map_single(
             catalog=sku_catalog,
             azure_region=azure_region,
             os_name=os_name,
+            intel_only=sap_db_related,
         )
         if sap_cert_required
         else None
@@ -932,7 +961,13 @@ def map_single(
         "fallback_suffix_priority_applied",
         "fallback_size_escalation_applied",
     ]
-    if cpu_vendor == "unknown" and prefer_amd and cpu_arch != "arm64" and not burstable and not gpu:
+    if (
+        effective_cpu_vendor == "unknown"
+        and effective_prefer_amd
+        and cpu_arch != "arm64"
+        and not burstable
+        and not gpu
+    ):
         assumptions.append("cpu_vendor_unknown_prefer_amd_applied")
     if sap_mode:
         assumptions.append("sap_workload_memory_priority_applied")

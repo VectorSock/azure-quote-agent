@@ -103,7 +103,7 @@ class MappingService:
             self.mapping_file = self._validate_mapping_file_path(mapping_file)
         if not self.mapping_file.exists():
             raise FileNotFoundError(
-                "mapping file not found; pass mapping_file or ensure data/rget_regions.xlsx exists"
+                "mapping file not found; pass mapping_file or ensure data/get_regions.csv exists"
             )
         self.resolver = RegionResolver.from_excel(self.mapping_file)
         return {
